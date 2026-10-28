@@ -1,421 +1,984 @@
-import crypto from 'node:crypto'
+
 import { getDbPool } from '../db.mjs'
 import { verifyAdminRequest } from '../auth.mjs'
-import { getCustomerSession, extractCustomerToken, handleGalleryCheckEmail } from './auth.mjs'
+import {
+  getCustomerSession,
+  extractCustomerToken,
+  handleGalleryCheckEmail,
+  normalizeEmail,
+  isValidEmail,
+} from './auth.mjs'
 import {
   validateImageBuffer,
   generateStorageKey,
   putObjectToR2,
   getObjectFromR2,
   deleteObjectFromR2,
-  checkR2Configuration,
   MAX_IMAGE_SIZE_BYTES,
 } from '../r2_storage.mjs'
 
-// In-memory mutex for concurrency-safe mutual exclusion per customer
-const activeUploadsByUser = new Set()
+/* =========================================================
+   ZEN CAFÉ — COMMUNITY GALLERY API
 
-/**
- * Helper to write JSON responses
- */
+   CUSTOMER WORKFLOW
+   1. Register once
+   2. Verify email once
+   3. Return to the gallery at any time
+   4. Enter the registered email
+   5. PostgreSQL checks verification and cooldown
+   6. Upload 1–2 photos
+   7. Photos publish immediately
+   8. Next upload available after 24 hours
+
+   IMPORTANT:
+   Email-only uploads do not prove email ownership.
+   This is the access policy selected for this gallery.
+========================================================= */
+
+const MAX_BATCH_PHOTOS = 2
+const MAX_BATCH_BYTES = 15 * 1024 * 1024
+const MAX_CAPTION_LENGTH = 1000
+const MAX_NAME_LENGTH = 150
+const COOLDOWN_MS = 24 * 60 * 60 * 1000
+
+/* =========================================================
+   JSON RESPONSES
+========================================================= */
+
 function jsonResponse(res, data, status = 200) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-token, x-customer-token',
+    'Access-Control-Allow-Methods':
+      'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization, x-admin-token, x-customer-token',
+    'X-Content-Type-Options': 'nosniff',
   })
+
   res.end(JSON.stringify(data))
+  return true
 }
 
 function jsonError(res, message, status = 400, details = null) {
-  jsonResponse(res, { success: false, error: message, message, ...(details ? { details } : {}) }, status)
+  return jsonResponse(
+    res,
+    {
+      success: false,
+      error: message,
+      message,
+      ...(details ? { details } : {}),
+    },
+    status
+  )
 }
 
-/**
- * Parse multipart/form-data or JSON payload
- */
-async function parseUploadPayload(req) {
+function badRequestMessage(error) {
+  return error instanceof Error
+    ? error.message
+    : 'Invalid upload request.'
+}
+
+function isPayloadError(error) {
+  return Boolean(error?.isPayloadError)
+}
+
+function payloadError(message) {
+  const error = new Error(message)
+  error.isPayloadError = true
+  return error
+}
+
+/* =========================================================
+   MULTIPART AND JSON PARSING
+========================================================= */
+
+function readRequestBuffer(req, limit = MAX_BATCH_BYTES) {
   return new Promise((resolve, reject) => {
-    const contentType = req.headers['content-type'] || ''
     const chunks = []
     let totalBytes = 0
-    const maxLimit = 15 * 1024 * 1024 // 15 MB limit for total batch
+    let settled = false
+
+    const declaredLength = Number(
+      req.headers['content-length'] || 0
+    )
+
+    if (declaredLength > limit) {
+      reject(
+        payloadError(
+          'Upload exceeds the maximum 15 MB request size.'
+        )
+      )
+
+      req.resume()
+      return
+    }
 
     req.on('data', chunk => {
+      if (settled) return
+
       totalBytes += chunk.length
-      if (totalBytes > maxLimit) {
-        reject(new Error('Total upload payload exceeds 15 MB limit.'))
+
+      if (totalBytes > limit) {
+        settled = true
+        chunks.length = 0
+
+        reject(
+          payloadError(
+            'Upload exceeds the maximum 15 MB request size.'
+          )
+        )
+
+        req.resume()
         return
       }
+
       chunks.push(chunk)
     })
 
     req.on('end', () => {
-      const fullBuffer = Buffer.concat(chunks)
+      if (settled) return
 
-      const textTrim = fullBuffer.toString('utf8').trim()
-      // 1. JSON payload support (for test suites / API clients)
-      if (contentType.includes('application/json') || (!contentType.includes('multipart') && textTrim.startsWith('{'))) {
-        try {
-          const parsed = JSON.parse(textTrim)
-          const photos = []
-          if (Array.isArray(parsed.photos)) {
-            for (const p of parsed.photos) {
-              if (p.data && typeof p.data === 'string') {
-                // Base64 data URL
-                const base64Data = p.data.replace(/^data:[^;]+;base64,/, '')
-                photos.push({
-                  filename: p.name || 'upload.jpg',
-                  buffer: Buffer.from(base64Data, 'base64'),
-                })
-              }
-            }
-          }
-          resolve({
-            fields: {
-              name: parsed.name || '',
-              caption: parsed.caption || '',
-              email: parsed.email || '',
-            },
-            photos,
-          })
-          return
-        } catch (err) {
-          reject(new Error('Invalid JSON payload: ' + err.message))
-          return
-        }
-      }
-
-      // 2. Multipart/form-data parsing
-      if (contentType.includes('multipart/form-data')) {
-        const boundaryMatch = contentType.match(/boundary=(?:["']?)([^"';]+)(?:["']?)/)
-        if (!boundaryMatch) {
-          reject(new Error('Missing multipart boundary.'))
-          return
-        }
-
-        const boundary = boundaryMatch[1]
-        const delimiter = Buffer.from(`--${boundary}`)
-        const fields = {}
-        const photos = []
-
-        // Split buffer by delimiter
-        let cur = 0
-        while (cur < fullBuffer.length) {
-          const nextIndex = fullBuffer.indexOf(delimiter, cur)
-          if (nextIndex === -1) break
-
-          const partStart = cur
-          const partEnd = nextIndex
-          cur = nextIndex + delimiter.length
-
-          if (partEnd <= partStart) continue
-          const part = fullBuffer.subarray(partStart, partEnd)
-
-          // Find header end (\r\n\r\n)
-          const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'))
-          if (headerEnd === -1) continue
-
-          const headerText = part.subarray(0, headerEnd).toString('utf8')
-          // Body starts after \r\n\r\n and trims trailing \r\n
-          let bodyStart = headerEnd + 4
-          let bodyEnd = part.length
-          if (part.subarray(part.length - 2).equals(Buffer.from('\r\n'))) {
-            bodyEnd -= 2
-          }
-          const bodyBuffer = part.subarray(bodyStart, bodyEnd)
-
-          // Check if it's a file
-          const filenameMatch = headerText.match(/filename=(?:["']?)([^"'\r\n]+)(?:["']?)/)
-          const nameMatch = headerText.match(/name=(?:["']?)([^"';\r\n]+)(?:["']?)/)
-          const fieldName = nameMatch ? nameMatch[1] : null
-
-          if (filenameMatch && bodyBuffer.length > 0) {
-            photos.push({
-              filename: filenameMatch[1],
-              buffer: bodyBuffer,
-            })
-          } else if (fieldName) {
-            fields[fieldName] = bodyBuffer.toString('utf8').trim()
-          }
-        }
-
-        resolve({ fields, photos })
-        return
-      }
-
-      reject(new Error('Unsupported content-type for upload. Expected multipart/form-data or application/json.'))
+      settled = true
+      resolve(Buffer.concat(chunks))
     })
 
-    req.on('error', reject)
+    req.on('error', error => {
+      if (settled) return
+
+      settled = true
+      reject(error)
+    })
+
+    req.on('aborted', () => {
+      if (settled) return
+
+      settled = true
+      reject(payloadError('Upload request was interrupted.'))
+    })
   })
 }
 
-/**
- * Main Gallery Route Handler
- */
-export async function handleGalleryRoute(req, res, parsedUrl) {
-  const pool = await getDbPool()
+function parseJsonPayload(buffer) {
+  let parsed
+
+  try {
+    parsed = JSON.parse(buffer.toString('utf8'))
+  } catch {
+    throw payloadError('Invalid JSON request body.')
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed)
+  ) {
+    throw payloadError('JSON request must be an object.')
+  }
+
+  const photos = []
+
+  if (parsed.photos !== undefined) {
+    if (!Array.isArray(parsed.photos)) {
+      throw payloadError('Photos must be an array.')
+    }
+
+    if (parsed.photos.length > MAX_BATCH_PHOTOS) {
+      throw payloadError(
+        'You can upload a maximum of 2 photos.'
+      )
+    }
+
+    for (const photo of parsed.photos) {
+      if (
+        !photo ||
+        typeof photo.data !== 'string'
+      ) {
+        throw payloadError('Invalid photo data.')
+      }
+
+      const encoded = photo.data.replace(
+        /^data:[^;]+;base64,/i,
+        ''
+      )
+
+      if (
+        !encoded ||
+        !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) ||
+        encoded.length % 4 === 1
+      ) {
+        throw payloadError('Invalid base64 photo data.')
+      }
+
+      photos.push({
+        filename: String(photo.name || 'upload.jpg'),
+        buffer: Buffer.from(encoded, 'base64'),
+      })
+    }
+  }
+
+  return {
+    fields: {
+      name: String(parsed.name || ''),
+      email: String(parsed.email || ''),
+      caption: String(parsed.caption || ''),
+    },
+    photos,
+  }
+}
+
+function parseMultipartPayload(buffer, contentType) {
+  const boundaryMatch = contentType.match(
+    /boundary=(?:"([^"]+)"|([^;\s]+))/i
+  )
+
+  const boundary =
+    boundaryMatch?.[1] || boundaryMatch?.[2]
+
+  if (!boundary) {
+    throw payloadError('Missing multipart boundary.')
+  }
+
+  const delimiter = Buffer.from(`--${boundary}`)
+  const headerSeparator = Buffer.from('\r\n\r\n')
+
+  const fields = {}
+  const photos = []
+
+  let cursor = buffer.indexOf(delimiter)
+
+  if (cursor < 0) {
+    throw payloadError('Invalid multipart upload body.')
+  }
+
+  while (cursor >= 0) {
+    const partStart = cursor + delimiter.length
+
+    if (
+      buffer.subarray(partStart, partStart + 2).toString() ===
+      '--'
+    ) {
+      break
+    }
+
+    if (
+      buffer.subarray(partStart, partStart + 2).toString() !==
+      '\r\n'
+    ) {
+      throw payloadError('Malformed multipart boundary.')
+    }
+
+    const headerStart = partStart + 2
+    const nextBoundary = buffer.indexOf(
+      delimiter,
+      headerStart
+    )
+
+    if (nextBoundary < 0) {
+      throw payloadError('Incomplete multipart upload.')
+    }
+
+    const partEnd = nextBoundary - 2
+
+    if (
+      partEnd < headerStart ||
+      buffer.subarray(partEnd, nextBoundary).toString() !==
+        '\r\n'
+    ) {
+      throw payloadError('Malformed multipart upload.')
+    }
+
+    const headerEnd = buffer.indexOf(
+      headerSeparator,
+      headerStart
+    )
+
+    if (
+      headerEnd < 0 ||
+      headerEnd >= partEnd
+    ) {
+      throw payloadError('Malformed multipart headers.')
+    }
+
+    const headerText = buffer
+      .subarray(headerStart, headerEnd)
+      .toString('utf8')
+
+    const bodyBuffer = buffer.subarray(
+      headerEnd + headerSeparator.length,
+      partEnd
+    )
+
+    const nameMatch = headerText.match(
+      /(?:^|;)\s*name="([^"]+)"/i
+    )
+
+    const filenameMatch = headerText.match(
+      /(?:^|;)\s*filename="([^"]*)"/i
+    )
+
+    const fieldName = nameMatch?.[1] || ''
+
+    if (filenameMatch) {
+      if (bodyBuffer.length > 0) {
+        photos.push({
+          filename: filenameMatch[1] || 'upload.jpg',
+          buffer: bodyBuffer,
+        })
+
+        if (photos.length > MAX_BATCH_PHOTOS) {
+          throw payloadError(
+            'You can upload a maximum of 2 photos.'
+          )
+        }
+      }
+    } else if (
+      fieldName === 'name' ||
+      fieldName === 'email' ||
+      fieldName === 'caption'
+    ) {
+      if (bodyBuffer.length > 4096) {
+        throw payloadError(
+          'A gallery text field is too large.'
+        )
+      }
+
+      fields[fieldName] = bodyBuffer
+        .toString('utf8')
+        .trim()
+    }
+
+    cursor = nextBoundary
+  }
+
+  return {
+    fields,
+    photos,
+  }
+}
+
+async function parseUploadPayload(req) {
+  const contentType = String(
+    req.headers['content-type'] || ''
+  ).toLowerCase()
+
+  const buffer = await readRequestBuffer(req)
+
+  if (contentType.includes('application/json')) {
+    return parseJsonPayload(buffer)
+  }
+
+  if (contentType.includes('multipart/form-data')) {
+    return parseMultipartPayload(buffer, contentType)
+  }
+
+  throw payloadError(
+    'Unsupported upload format. Use multipart/form-data or application/json.'
+  )
+}
+
+/* =========================================================
+   PHOTO SERIALIZATION
+========================================================= */
+
+function photoImageUrl(row) {
+  return (
+    row.image_url ||
+    `/api/gallery/image/${encodeURIComponent(row.image_key)}`
+  )
+}
+
+function serializePublicPhoto(row) {
+  const imageUrl = photoImageUrl(row)
+
+  return {
+    id: String(row.id),
+    user: row.user_name || 'Zen Guest',
+    caption: row.caption || '',
+    imageUrl,
+    image_url: imageUrl,
+    createdAt: row.created_at
+      ? new Date(row.created_at).toISOString()
+      : new Date().toISOString(),
+    likes: 0,
+  }
+}
+
+/* =========================================================
+   CUSTOMER EMAIL LOOKUP
+========================================================= */
+
+async function findVerifiedCustomer(client, email) {
+  const result = await client.query(
+    `SELECT
+       id,
+       name,
+       email,
+       role,
+       email_verified_at,
+       is_active
+     FROM public.users
+     WHERE LOWER(email) = LOWER($1)
+     LIMIT 1`,
+    [email]
+  )
+
+  return result.rows[0] || null
+}
+
+async function getGalleryAccess(client, userId) {
+  const result = await client.query(
+    `SELECT
+       eligible_at,
+       max_uploads
+     FROM public.gallery_access
+     WHERE user_id = $1
+     FOR UPDATE`,
+    [userId]
+  )
+
+  return result.rows[0] || null
+}
+
+function getCooldownRemaining(eligibleAt) {
+  if (!eligibleAt) return 0
+
+  const timestamp = new Date(eligibleAt).getTime()
+
+  if (!Number.isFinite(timestamp)) return 0
+
+  return Math.max(0, timestamp - Date.now())
+}
+
+/* =========================================================
+   UPLOAD VALIDATION
+========================================================= */
+
+function validateUploadFields(fields, photos) {
+  const email = normalizeEmail(fields.email)
+  const name = String(fields.name || '').trim()
+  const caption = String(fields.caption || '').trim()
+
+  if (!isValidEmail(email)) {
+    throw payloadError(
+      'Please enter a valid registered email address.'
+    )
+  }
+
+  if (name.length > MAX_NAME_LENGTH) {
+    throw payloadError(
+      'Customer name is too long.'
+    )
+  }
+
+  if (caption.length > MAX_CAPTION_LENGTH) {
+    throw payloadError(
+      'Caption must not exceed 1000 characters.'
+    )
+  }
+
+  if (!Array.isArray(photos) || photos.length === 0) {
+    throw payloadError(
+      'Please select at least one photo.'
+    )
+  }
+
+  if (photos.length > MAX_BATCH_PHOTOS) {
+    throw payloadError(
+      'Maximum 2 photos are allowed per upload.'
+    )
+  }
+
+  const validatedPhotos = []
+
+  for (const photo of photos) {
+    if (
+      !Buffer.isBuffer(photo.buffer) ||
+      photo.buffer.length === 0
+    ) {
+      throw payloadError(
+        'An uploaded photo is empty or invalid.'
+      )
+    }
+
+    if (
+      Number.isFinite(MAX_IMAGE_SIZE_BYTES) &&
+      photo.buffer.length > MAX_IMAGE_SIZE_BYTES
+    ) {
+      throw payloadError(
+        'One of the photos exceeds the allowed image size.'
+      )
+    }
+
+    let validation
+
+    try {
+      validation = validateImageBuffer(photo.buffer)
+    } catch (error) {
+      throw payloadError(
+        `Image validation failed: ${badRequestMessage(error)}`
+      )
+    }
+
+    validatedPhotos.push({
+      buffer: photo.buffer,
+      ext: validation.ext,
+      mime: validation.mime,
+    })
+  }
+
+  return {
+    email,
+    name,
+    caption,
+    photos: validatedPhotos,
+  }
+}
+
+/* =========================================================
+   R2 CLEANUP AFTER FAILED DATABASE TRANSACTION
+========================================================= */
+
+async function cleanupUploadedObjects(keys) {
+  for (const key of keys) {
+    try {
+      await deleteObjectFromR2(key)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] R2 cleanup failed:',
+        key,
+        error
+      )
+    }
+  }
+}
+
+/* =========================================================
+   MAIN GALLERY ROUTE HANDLER
+========================================================= */
+
+export async function handleGalleryRoute(
+  req,
+  res,
+  parsedUrl
+) {
   const pathname = parsedUrl.pathname
   const method = req.method
 
-  // ========================================================
-  // 1. GET /api/gallery/public (Public: Approved Community Photos)
-  // ========================================================
-  if (pathname === '/api/gallery/public' && method === 'GET') {
+  /* =======================================================
+     1. PUBLIC GALLERY
+     GET /api/gallery/public
+  ======================================================= */
+
+  if (
+    pathname === '/api/gallery/public' &&
+    method === 'GET'
+  ) {
     try {
-      const result = await pool.query(`
-        SELECT 
-          g.id,
-          g.title,
-          g.description AS caption,
-          g.image_url,
-          g.image_key,
-          g.created_at,
-          COALESCE(u.name, g.title, 'Zen Guest') AS user_name
-        FROM public.gallery g
-        LEFT JOIN public.users u ON u.id = g.uploaded_by
-        WHERE g.status = 'approved'
-        ORDER BY g.created_at DESC
-        LIMIT 50
-      `)
+      const pool = await getDbPool()
+
+      const result = await pool.query(
+        `SELECT
+           g.id,
+           g.title,
+           g.description AS caption,
+           g.image_url,
+           g.image_key,
+           g.created_at,
+           COALESCE(u.name, g.title, 'Zen Guest')
+             AS user_name
+         FROM public.gallery g
+         LEFT JOIN public.users u
+           ON u.id = g.uploaded_by
+         WHERE g.status = 'approved'
+         ORDER BY g.created_at DESC
+         LIMIT 50`
+      )
 
       return jsonResponse(res, {
         success: true,
         count: result.rows.length,
-        photos: result.rows.map(r => ({
-          id: String(r.id),
-          user: r.user_name || 'Zen Guest',
-          caption: r.caption || '',
-          imageUrl: r.image_url || `/api/gallery/image/${encodeURIComponent(r.image_key)}`,
-          image_url: r.image_url || `/api/gallery/image/${encodeURIComponent(r.image_key)}`,
-          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
-          likes: 0,
-        })),
+        photos: result.rows.map(serializePublicPhoto),
       })
-    } catch (err) {
-      console.error('Error fetching public gallery:', err)
-      return jsonError(res, 'Failed to fetch public gallery photos.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Public photos error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to load community gallery photos.',
+        500
+      )
     }
   }
 
-  // ========================================================
-  // 1b. POST /api/gallery/check-email (Check customer eligibility)
-  // ========================================================
-  if (pathname === '/api/gallery/check-email' && method === 'POST') {
-    try {
-      const payload = await parseUploadPayload(req).catch(() => ({ fields: {} }))
-      const result = await handleGalleryCheckEmail(req, res, payload.fields)
-      return jsonResponse(res, result.body, result.status)
-    } catch (err) {
-      console.error('Error in /api/gallery/check-email:', err)
-      return jsonError(res, 'Failed to check gallery eligibility.', 500)
-    }
-  }
+  /* =======================================================
+     2. CHECK REGISTERED EMAIL
+     POST /api/gallery/check-email
 
-  // ========================================================
-  // 2. POST /api/gallery/upload (Customer Photo Upload)
-  // ========================================================
-  if (pathname === '/api/gallery/upload' && method === 'POST') {
-    let client
-    let user = null
+     No customer session is required.
+     Email must exist and be verified in PostgreSQL.
+  ======================================================= */
+
+  if (
+    pathname === '/api/gallery/check-email' &&
+    method === 'POST'
+  ) {
     try {
       const payload = await parseUploadPayload(req)
-      const { fields, photos } = payload
-      const email = String(fields.email || '').trim().toLowerCase()
-      const name = String(fields.name || '').trim()
-      const caption = String(fields.caption || '').trim()
 
-      if (!email) {
-        return jsonError(res, 'Registered email is required for gallery upload.', 400)
+      const result = await handleGalleryCheckEmail(
+        req,
+        res,
+        payload.fields
+      )
+
+      return jsonResponse(
+        res,
+        result.body,
+        result.status
+      )
+    } catch (error) {
+      if (isPayloadError(error)) {
+        return jsonError(
+          res,
+          badRequestMessage(error),
+          400
+        )
       }
 
-      // 1. Customer must have a valid server-verified customer session
-      const token = extractCustomerToken(req)
-      if (!token) {
-        return jsonError(res, 'Authentication required: A valid verified customer session token is required to upload photos.', 401)
-      }
+      console.error(
+        '[Zen Café Gallery] Email check error:',
+        error
+      )
 
-      const session = await getCustomerSession(token)
-      if (!session) {
-        return jsonError(res, 'Invalid or expired customer session. Please verify your email or log in again.', 401)
-      }
+      return jsonError(
+        res,
+        'Failed to check gallery eligibility.',
+        500
+      )
+    }
+  }
 
+  /* =======================================================
+     3. CUSTOMER PHOTO UPLOAD
+     POST /api/gallery/upload
+
+     Registered email only.
+     No Bearer token or customer session required.
+
+     PostgreSQL row lock serializes uploads for
+     the same customer across API processes.
+
+     A successful batch publishes immediately
+     and starts one 24-hour cooldown.
+  ======================================================= */
+
+  if (
+    pathname === '/api/gallery/upload' &&
+    method === 'POST'
+  ) {
+    let client = null
+    let transactionOpen = false
+    let committed = false
+
+    const uploadedObjectKeys = []
+
+    try {
+      const payload = await parseUploadPayload(req)
+
+      const validated = validateUploadFields(
+        payload.fields,
+        payload.photos
+      )
+
+      const pool = await getDbPool()
       client = await pool.connect()
+
       await client.query('BEGIN')
+      transactionOpen = true
 
-      // 2. Fetch authenticated customer record from PostgreSQL
-      const userRes = await client.query(
-        'SELECT id, name, email, email_verified_at, is_active FROM public.users WHERE id = $1',
-        [session.userId]
+      // Lock the customer record so simultaneous uploads
+      // for the same email cannot both pass cooldown checks.
+      const customerResult = await client.query(
+        `SELECT
+           id,
+           name,
+           email,
+           role,
+           email_verified_at,
+           is_active
+         FROM public.users
+         WHERE LOWER(email) = LOWER($1)
+         FOR UPDATE`,
+        [validated.email]
       )
 
-      if (userRes.rows.length === 0) {
+      if (customerResult.rows.length === 0) {
         await client.query('ROLLBACK')
-        return jsonError(res, 'Customer account not found.', 403)
+        transactionOpen = false
+
+        return jsonError(
+          res,
+          'This email is not registered. Please register and verify your email first.',
+          403
+        )
       }
 
-      user = userRes.rows[0]
+      const customer = customerResult.rows[0]
 
-      // Concurrency lock: Reject simultaneous upload requests for the same customer
-      if (activeUploadsByUser.has(user.id)) {
+      if (
+        customer.role !== 'customer' ||
+        !customer.is_active
+      ) {
         await client.query('ROLLBACK')
-        return jsonError(res, 'Simultaneous upload request rejected. Cooldown in effect.', 429)
-      }
-      activeUploadsByUser.add(user.id)
+        transactionOpen = false
 
-      // 3. Do not authorize uploads using a typed email address alone.
-      // If a typed email is provided in the form, ensure it matches the authenticated session user
-      if (email && email.toLowerCase() !== user.email.toLowerCase()) {
-        await client.query('ROLLBACK')
-        return jsonError(res, 'Authenticated customer session does not match the provided email address.', 403)
-      }
-
-      // 4. Verify email_verified_at is populated
-      if (!user.email_verified_at) {
-        await client.query('ROLLBACK')
-        return jsonError(res, 'Your email is not verified yet. Please click the verification link sent to your inbox.', 403)
+        return jsonError(
+          res,
+          'This customer account is not eligible for gallery uploads.',
+          403
+        )
       }
 
-      if (!user.is_active) {
+      if (!customer.email_verified_at) {
         await client.query('ROLLBACK')
-        return jsonError(res, 'Customer account is deactivated.', 403)
+        transactionOpen = false
+
+        return jsonError(
+          res,
+          'Your email has not been verified. Please complete email verification first.',
+          403
+        )
       }
 
-      // Enforce batch size limits (1 or 2 images)
-      if (!photos || photos.length < 1) {
-        await client.query('ROLLBACK')
-        return jsonError(res, 'Please select at least 1 photo to upload.', 400)
-      }
-
-      if (photos.length > 2) {
-        await client.query('ROLLBACK')
-        return jsonError(res, 'Maximum 2 images allowed per upload batch.', 400)
-      }
-
-      // Concurrency-safe: Check gallery_access cooldown with FOR UPDATE
-      const accessRes = await client.query(
-        'SELECT eligible_at, max_uploads FROM public.gallery_access WHERE user_id = $1 FOR UPDATE',
-        [user.id]
+      // Ensure an access record exists for verified customers.
+      // Initial eligible_at = NOW() means immediate access.
+      await client.query(
+        `INSERT INTO public.gallery_access
+           (
+             user_id,
+             eligible_at,
+             max_uploads,
+             created_at
+           )
+         VALUES ($1, NOW(), 2, NOW())
+         ON CONFLICT (user_id) DO NOTHING`,
+        [customer.id]
       )
 
-      const now = new Date()
-      let eligibleAt = null
+      const access = await getGalleryAccess(
+        client,
+        customer.id
+      )
 
-      if (accessRes.rows.length > 0 && accessRes.rows[0].eligible_at) {
-        eligibleAt = new Date(accessRes.rows[0].eligible_at)
-        if (eligibleAt > now) {
-          await client.query('ROLLBACK')
-          return jsonError(
-            res,
-            `24-hour upload cooldown is active. Please wait until ${eligibleAt.toISOString()} to upload again.`,
-            429,
-            { nextUploadAt: eligibleAt.toISOString() }
-          )
-        }
+      const cooldownRemaining = getCooldownRemaining(
+        access?.eligible_at
+      )
+
+      if (cooldownRemaining > 0) {
+        const nextUploadAt = new Date(
+          access.eligible_at
+        ).toISOString()
+
+        await client.query('ROLLBACK')
+        transactionOpen = false
+
+        return jsonError(
+          res,
+          `24-hour upload cooldown is active. You can upload again after ${nextUploadAt}.`,
+          429,
+          {
+            nextUploadAt,
+            remainingMs: cooldownRemaining,
+          }
+        )
       }
 
-      // Validate each image buffer (magic bytes and size limit)
-      const validatedImages = []
-      for (const p of photos) {
-        try {
-          const validation = validateImageBuffer(p.buffer)
-          validatedImages.push({
-            buffer: p.buffer,
-            ext: validation.ext,
-            mime: validation.mime,
-          })
-        } catch (vErr) {
-          await client.query('ROLLBACK')
-          return jsonError(res, `Image validation failed: ${vErr.message}`, 400)
-        }
+      const allowedPhotos = Math.min(
+        MAX_BATCH_PHOTOS,
+        Number(access?.max_uploads || MAX_BATCH_PHOTOS)
+      )
+
+      if (
+        validated.photos.length > allowedPhotos
+      ) {
+        await client.query('ROLLBACK')
+        transactionOpen = false
+
+        return jsonError(
+          res,
+          `You can upload a maximum of ${allowedPhotos} photos.`,
+          400
+        )
       }
 
-      // Upload images to R2 storage & record in public.gallery
       const createdPhotos = []
-      for (const img of validatedImages) {
-        const storageKey = generateStorageKey(img.ext)
-        const putResult = await putObjectToR2({
+
+      for (const photo of validated.photos) {
+        const storageKey = generateStorageKey(
+          photo.ext
+        )
+
+        // Track the key before upload so a partial R2
+        // failure can still be cleaned up.
+        uploadedObjectKeys.push(storageKey)
+
+        const storedObject = await putObjectToR2({
           key: storageKey,
-          buffer: img.buffer,
-          contentType: img.mime,
+          buffer: photo.buffer,
+          contentType: photo.mime,
         })
 
-        const insertRes = await client.query(
-         `INSERT INTO public.gallery (
-   uploaded_by, title, description, image_key, image_url, status, created_at
- ) VALUES ($1, $2, $3, $4, $5, 'approved', NOW())
- RETURNING id, title, description, image_key, image_url, status, created_at`,
+        const insertResult = await client.query(
+          `INSERT INTO public.gallery
+             (
+               uploaded_by,
+               title,
+               description,
+               image_key,
+               image_url,
+               status,
+               created_at
+             )
+           VALUES
+             ($1, $2, $3, $4, $5, 'approved', NOW())
+           RETURNING
+             id,
+             title,
+             description,
+             image_key,
+             image_url,
+             status,
+             created_at`,
           [
-            user.id,
-            name || user.name,
-            caption || '',
+            customer.id,
+            customer.name || validated.name || 'Zen Guest',
+            validated.caption,
             storageKey,
-            putResult.url,
+            storedObject?.url || null,
           ]
         )
-        createdPhotos.push(insertRes.rows[0])
+
+        createdPhotos.push(insertResult.rows[0])
       }
 
-      // Update 24-hour cooldown in public.gallery_access
-      const nextEligibleAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      // Only after all photos have been successfully
+      // stored and inserted do we start the cooldown.
+      const nextEligibleAt = new Date(
+        Date.now() + COOLDOWN_MS
+      )
+
       await client.query(
-        `INSERT INTO public.gallery_access (user_id, eligible_at, max_uploads, created_at)
-         VALUES ($1, $2, 2, NOW())
-         ON CONFLICT (user_id) DO UPDATE SET eligible_at = $2`,
-        [user.id, nextEligibleAt]
+        `UPDATE public.gallery_access
+         SET eligible_at = $2
+         WHERE user_id = $1`,
+        [
+          customer.id,
+          nextEligibleAt,
+        ]
       )
 
       await client.query('COMMIT')
+
+      transactionOpen = false
+      committed = true
 
       return jsonResponse(
         res,
         {
           success: true,
-        message: 'Photos uploaded successfully! Your photos are now visible in the community gallery.',
+          message:
+            'Photos uploaded successfully! Your photos are now visible in the Community Gallery.',
           count: createdPhotos.length,
           uploadedCount: createdPhotos.length,
           status: 'approved',
           nextUploadAt: nextEligibleAt.toISOString(),
-          photos: createdPhotos.map(p => ({
-            id: String(p.id),
-            title: p.title,
-            caption: p.description,
-            imageUrl: p.image_url,
-            image_key: p.image_key,
-            status: p.status,
+          photos: createdPhotos.map(photo => ({
+            id: String(photo.id),
+            title: photo.title,
+            caption: photo.description || '',
+            imageUrl: photoImageUrl(photo),
+            image_url: photoImageUrl(photo),
+            image_key: photo.image_key,
+            status: photo.status,
           })),
         },
         201
       )
-    } catch (err) {
-      if (client) await client.query('ROLLBACK').catch(() => {})
-      console.error('Error uploading gallery photos:', err)
-      return jsonError(res, err.message || 'Failed to upload photo batch.', 500)
-    } finally {
-      if (user && user.id) {
-        activeUploadsByUser.delete(user.id)
+    } catch (error) {
+      if (transactionOpen && client) {
+        await client.query('ROLLBACK').catch(
+          rollbackError => {
+            console.error(
+              '[Zen Café Gallery] Rollback failed:',
+              rollbackError
+            )
+          }
+        )
       }
-      if (client) client.release()
+
+      if (!committed && uploadedObjectKeys.length > 0) {
+        await cleanupUploadedObjects(
+          uploadedObjectKeys
+        )
+      }
+
+      if (isPayloadError(error)) {
+        return jsonError(
+          res,
+          badRequestMessage(error),
+          400
+        )
+      }
+
+      console.error(
+        '[Zen Café Gallery] Upload error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Unable to upload photos. Please try again.',
+        500
+      )
+    } finally {
+      if (client) {
+        client.release()
+      }
     }
   }
 
-  // ========================================================
-  // 3. ADMIN GALLERY MODERATION ROUTES
-  // ========================================================
+  /* =======================================================
+     4. ADMIN — LIST GALLERY PHOTOS
+     GET /api/gallery/admin/photos
+  ======================================================= */
 
-  // GET /api/gallery/admin/photos (Admin only: View photos)
-  if (pathname === '/api/gallery/admin/photos' && method === 'GET') {
+  if (
+    pathname === '/api/gallery/admin/photos' &&
+    method === 'GET'
+  ) {
     if (!(await verifyAdminRequest(req))) {
-      return jsonError(res, 'Unauthorized: Admin authentication required.', 401)
+      return jsonError(
+        res,
+        'Admin authentication required.',
+        401
+      )
     }
 
     try {
-      const statusFilter = parsedUrl.searchParams.get('status') || 'all'
+      const pool = await getDbPool()
+
+      const statusFilter =
+        parsedUrl.searchParams.get('status') || 'all'
+
+      const parameters = []
+
       let query = `
-        SELECT 
+        SELECT
           g.id,
           g.title,
           g.description,
@@ -427,179 +990,353 @@ export async function handleGalleryRoute(req, res, parsedUrl) {
           u.email AS customer_email,
           u.phone AS customer_phone
         FROM public.gallery g
-        LEFT JOIN public.users u ON u.id = g.uploaded_by
+        LEFT JOIN public.users u
+          ON u.id = g.uploaded_by
       `
-      const params = []
+
       if (statusFilter !== 'all') {
-        params.push(statusFilter)
+        parameters.push(statusFilter)
         query += ` WHERE g.status = $1`
       }
-      query += ` ORDER BY g.created_at DESC LIMIT 100`
 
-      const result = await pool.query(query, params)
+      query += `
+        ORDER BY g.created_at DESC
+        LIMIT 100
+      `
+
+      const result = await pool.query(
+        query,
+        parameters
+      )
+
       return jsonResponse(res, {
         success: true,
         count: result.rows.length,
-        photos: result.rows.map(r => ({
-          id: String(r.id),
-          title: r.title,
-          description: r.description,
-          imageUrl: r.image_url || `/api/gallery/image/${encodeURIComponent(r.image_key)}`,
-          image_url: r.image_url || `/api/gallery/image/${encodeURIComponent(r.image_key)}`,
-          status: r.status,
-          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
-          customerName: r.customer_name || 'Guest',
-          customerEmail: r.customer_email || '—',
-          customerPhone: r.customer_phone || '—',
+        photos: result.rows.map(row => ({
+          id: String(row.id),
+          title: row.title,
+          description: row.description,
+          imageUrl: photoImageUrl(row),
+          image_url: photoImageUrl(row),
+          status: row.status,
+          createdAt: row.created_at
+            ? new Date(row.created_at).toISOString()
+            : null,
+          customerName:
+            row.customer_name || 'Zen Guest',
+          customerEmail:
+            row.customer_email || '—',
+          customerPhone:
+            row.customer_phone || '—',
         })),
       })
-    } catch (err) {
-      console.error('Error fetching admin gallery photos:', err)
-      return jsonError(res, 'Failed to fetch photos for moderation.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Admin list error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to load gallery photos.',
+        500
+      )
     }
   }
 
-  // POST /api/gallery/admin/photos/:id/approve (Admin: Approve photo)
-  const approveMatch = pathname.match(/^\/api\/gallery\/admin\/photos\/(\d+)\/approve$/)
+  /* =======================================================
+     5. ADMIN — APPROVE PHOTO
+  ======================================================= */
+
+  const approveMatch = pathname.match(
+    /^\/api\/gallery\/admin\/photos\/(\d+)\/approve$/
+  )
+
   if (approveMatch && method === 'POST') {
     if (!(await verifyAdminRequest(req))) {
-      return jsonError(res, 'Unauthorized: Admin authentication required.', 401)
+      return jsonError(
+        res,
+        'Admin authentication required.',
+        401
+      )
     }
 
-    const photoId = Number(approveMatch[1])
     try {
-      const updRes = await pool.query(
-        `UPDATE public.gallery SET status = 'approved' WHERE id = $1 RETURNING *`,
-        [photoId]
+      const pool = await getDbPool()
+
+      const result = await pool.query(
+        `UPDATE public.gallery
+         SET status = 'approved'
+         WHERE id = $1
+         RETURNING *`,
+        [approveMatch[1]]
       )
-      if (updRes.rows.length === 0) {
-        return jsonError(res, 'Photo not found.', 404)
+
+      if (result.rows.length === 0) {
+        return jsonError(
+          res,
+          'Photo not found.',
+          404
+        )
       }
+
       return jsonResponse(res, {
         success: true,
-        message: 'Photo approved and published to community gallery.',
-        data: updRes.rows[0],
+        message:
+          'Photo approved and published.',
+        data: result.rows[0],
       })
-    } catch (err) {
-      console.error('Error approving gallery photo:', err)
-      return jsonError(res, 'Failed to approve photo.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Approve error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to approve photo.',
+        500
+      )
     }
   }
 
-  // POST /api/gallery/admin/photos/:id/reject (Admin: Reject photo)
-  const rejectMatch = pathname.match(/^\/api\/gallery\/admin\/photos\/(\d+)\/reject$/)
+  /* =======================================================
+     6. ADMIN — REJECT PHOTO
+  ======================================================= */
+
+  const rejectMatch = pathname.match(
+    /^\/api\/gallery\/admin\/photos\/(\d+)\/reject$/
+  )
+
   if (rejectMatch && method === 'POST') {
     if (!(await verifyAdminRequest(req))) {
-      return jsonError(res, 'Unauthorized: Admin authentication required.', 401)
+      return jsonError(
+        res,
+        'Admin authentication required.',
+        401
+      )
     }
 
-    const photoId = Number(rejectMatch[1])
     try {
-      const updRes = await pool.query(
-        `UPDATE public.gallery SET status = 'rejected' WHERE id = $1 RETURNING *`,
-        [photoId]
+      const pool = await getDbPool()
+
+      const result = await pool.query(
+        `UPDATE public.gallery
+         SET status = 'rejected'
+         WHERE id = $1
+         RETURNING *`,
+        [rejectMatch[1]]
       )
-      if (updRes.rows.length === 0) {
-        return jsonError(res, 'Photo not found.', 404)
+
+      if (result.rows.length === 0) {
+        return jsonError(
+          res,
+          'Photo not found.',
+          404
+        )
       }
+
       return jsonResponse(res, {
         success: true,
         message: 'Photo rejected.',
-        data: updRes.rows[0],
+        data: result.rows[0],
       })
-    } catch (err) {
-      console.error('Error rejecting gallery photo:', err)
-      return jsonError(res, 'Failed to reject photo.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Reject error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to reject photo.',
+        500
+      )
     }
   }
 
-  // DELETE /api/gallery/admin/photos/:id (Admin: Delete photo)
-  const deleteMatch = pathname.match(/^\/api\/gallery\/admin\/photos\/(\d+)$/)
+  /* =======================================================
+     7. ADMIN — DELETE PHOTO
+  ======================================================= */
+
+  const deleteMatch = pathname.match(
+    /^\/api\/gallery\/admin\/photos\/(\d+)$/
+  )
+
   if (deleteMatch && method === 'DELETE') {
     if (!(await verifyAdminRequest(req))) {
-      return jsonError(res, 'Unauthorized: Admin authentication required.', 401)
+      return jsonError(
+        res,
+        'Admin authentication required.',
+        401
+      )
     }
 
-    const photoId = Number(deleteMatch[1])
     try {
-      const photoRes = await pool.query('SELECT image_key FROM public.gallery WHERE id = $1', [photoId])
-      if (photoRes.rows.length === 0) {
-        return jsonError(res, 'Photo not found.', 404)
+      const pool = await getDbPool()
+
+      const result = await pool.query(
+        `SELECT image_key
+         FROM public.gallery
+         WHERE id = $1`,
+        [deleteMatch[1]]
+      )
+
+      if (result.rows.length === 0) {
+        return jsonError(
+          res,
+          'Photo not found.',
+          404
+        )
       }
 
-      const imageKey = photoRes.rows[0].image_key
-      // Delete the image from Cloudflare R2 first.
-// If R2 deletion fails, preserve the PostgreSQL record.
-await deleteObjectFromR2(imageKey)
+      const imageKey = result.rows[0].image_key
 
-// Remove the database record only after R2 deletion succeeds.
-await pool.query(
-  'DELETE FROM public.gallery WHERE id = $1',
-  [photoId]
-)
+      // Preserve the existing behavior:
+      // delete R2 object first, then PostgreSQL record.
+      await deleteObjectFromR2(imageKey)
+
+      await pool.query(
+        `DELETE FROM public.gallery
+         WHERE id = $1`,
+        [deleteMatch[1]]
+      )
 
       return jsonResponse(res, {
         success: true,
         message: 'Photo deleted permanently.',
       })
-    } catch (err) {
-      console.error('Error deleting gallery photo:', err)
-      return jsonError(res, 'Failed to delete photo.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Delete error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to delete photo.',
+        500
+      )
     }
   }
 
-  // ========================================================
-  // 4. GET /api/gallery/image/:key (Safe Private Image Serving)
-  // ========================================================
-  const imageMatch = pathname.match(/^\/api\/gallery\/image\/(.+)$/)
+  /* =======================================================
+     8. SERVE GALLERY IMAGE
+     GET /api/gallery/image/:key
+
+     Approved images are public.
+     Non-approved images remain protected.
+  ======================================================= */
+
+  const imageMatch = pathname.match(
+    /^\/api\/gallery\/image\/(.+)$/
+  )
+
   if (imageMatch && method === 'GET') {
-    const rawKey = decodeURIComponent(imageMatch[1])
+    let imageKey
+
     try {
-      // Lookup status in PostgreSQL
-      const photoRes = await pool.query(
-        'SELECT status, uploaded_by FROM public.gallery WHERE image_key = $1',
-        [rawKey]
+      imageKey = decodeURIComponent(
+        imageMatch[1]
+      )
+    } catch {
+      return jsonError(
+        res,
+        'Invalid image key.',
+        400
+      )
+    }
+
+    try {
+      const pool = await getDbPool()
+
+      const result = await pool.query(
+        `SELECT
+           status,
+           uploaded_by
+         FROM public.gallery
+         WHERE image_key = $1`,
+        [imageKey]
       )
 
-      if (photoRes.rows.length === 0) {
-        return jsonError(res, 'Image not found.', 404)
+      if (result.rows.length === 0) {
+        return jsonError(
+          res,
+          'Image not found.',
+          404
+        )
       }
 
-      const photo = photoRes.rows[0]
+      const photo = result.rows[0]
 
-      // If pending or rejected, require admin or uploader authorization
       if (photo.status !== 'approved') {
         const isAdmin = await verifyAdminRequest(req)
-        const custToken = extractCustomerToken(req)
+
         let isUploader = false
-        if (custToken) {
-          const custSession = await getCustomerSession(custToken)
-          if (custSession && String(custSession.userId) === String(photo.uploaded_by)) {
-            isUploader = true
+
+        if (!isAdmin) {
+          const token = extractCustomerToken(req)
+
+          if (token) {
+            const session = await getCustomerSession(
+              token
+            )
+
+            isUploader = Boolean(
+              session &&
+              String(session.userId) ===
+                String(photo.uploaded_by)
+            )
           }
         }
 
         if (!isAdmin && !isUploader) {
-          return jsonError(res, 'Unauthorized: Image is awaiting moderation.', 403)
+          return jsonError(
+            res,
+            'This image is not publicly available.',
+            403
+          )
         }
       }
 
-      const obj = await getObjectFromR2(rawKey)
-      if (!obj || !obj.buffer) {
-        return jsonError(res, 'Image object not found in storage.', 404)
+      const object = await getObjectFromR2(
+        imageKey
+      )
+
+      if (!object || !object.buffer) {
+        return jsonError(
+          res,
+          'Image not found in storage.',
+          404
+        )
       }
 
       res.writeHead(200, {
-        'Content-Type': obj.contentType || 'image/jpeg',
-        'Content-Length': obj.buffer.length,
-        'Cache-Control': photo.status === 'approved' ? 'public, max-age=86400' : 'private, no-cache',
+        'Content-Type':
+          object.contentType || 'image/jpeg',
+        'Content-Length':
+          object.buffer.length,
+        'Cache-Control':
+          photo.status === 'approved'
+            ? 'public, max-age=86400'
+            : 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
       })
-      res.end(obj.buffer)
+
+      res.end(object.buffer)
+
       return true
-    } catch (err) {
-      console.error('Error serving gallery image:', err)
-      return jsonError(res, 'Error serving image.', 500)
+    } catch (error) {
+      console.error(
+        '[Zen Café Gallery] Image error:',
+        error
+      )
+
+      return jsonError(
+        res,
+        'Failed to load gallery image.',
+        500
+      )
     }
   }
 

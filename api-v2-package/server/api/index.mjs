@@ -1,3 +1,4 @@
+
 import {
   handleGetProducts,
   handleGetProductById,
@@ -32,398 +33,691 @@ import {
   handleCustomerMe,
   handleCustomerLogout,
   handleGalleryCheckEmail,
-  handleGalleryLoginRequest,
-  handleGalleryLoginVerify,
 } from './auth.mjs'
 
 import { isDbInMemory, getDbPool } from '../db.mjs'
 import { handleAdminNotificationsRoute } from './notifications.mjs'
 
+/* =========================================================
+   ZEN CAFÉ API ROUTER
+
+   Community Gallery:
+   - Customer registers once
+   - Customer verifies email once
+   - Returning customers check registered email
+   - No gallery login or magic-link routes
+   - No customer session required for photo upload
+   - Upload eligibility enforced by gallery.mjs
+========================================================= */
+
+const MAX_JSON_BYTES = 1024 * 1024
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
-    let body = ''
+    const chunks = []
+    let size = 0
+    let settled = false
+
+    const declaredSize = Number(
+      req.headers['content-length'] || 0
+    )
+
+    if (declaredSize > MAX_JSON_BYTES) {
+      reject(new Error('Payload Too Large'))
+      req.resume()
+      return
+    }
+
     req.on('data', chunk => {
-      body += chunk
-      if (body.length > 10 * 1024 * 1024) {
-        // 10MB limit
+      if (settled) return
+
+      size += chunk.length
+
+      if (size > MAX_JSON_BYTES) {
+        settled = true
         reject(new Error('Payload Too Large'))
+        req.resume()
+        return
       }
+
+      chunks.push(chunk)
     })
 
     req.on('end', () => {
-      if (!body) return resolve({})
+      if (settled) return
+      settled = true
+
+      const body = Buffer.concat(chunks).toString('utf8')
+
+      if (!body.trim()) {
+        resolve({})
+        return
+      }
+
       try {
-        resolve(JSON.parse(body))
-      } catch (err) {
-        reject(new Error('Invalid JSON: ' + err.message))
+        const parsed = JSON.parse(body)
+
+        if (
+          parsed === null ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed)
+        ) {
+          reject(new Error('JSON body must be an object.'))
+          return
+        }
+
+        resolve(parsed)
+      } catch (error) {
+        reject(
+          new Error(
+            error instanceof SyntaxError
+              ? 'Invalid JSON body.'
+              : error.message
+          )
+        )
       }
     })
 
-    req.on('error', reject)
+    req.on('error', error => {
+      if (settled) return
+      settled = true
+      reject(error)
+    })
+
+    req.on('aborted', () => {
+      if (settled) return
+      settled = true
+      reject(new Error('Request interrupted.'))
+    })
   })
 }
 
 function sendJson(res, status, data) {
+  if (res.headersSent || res.writableEnded) return
+
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-token',
+    'Access-Control-Allow-Methods':
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization, x-admin-token, x-customer-token',
+    'X-Content-Type-Options': 'nosniff',
   })
+
   res.end(JSON.stringify(data))
 }
 
-export async function handleApiRequest(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
-  const pathname = url.pathname.replace(/\/+$/, '') || '/'
+function sendMethodNotAllowed(res) {
+  sendJson(res, 405, {
+    success: false,
+    error: 'Method Not Allowed',
+  })
 
-  // Handle CORS Preflight
+  return true
+}
+
+function sendBodyError(res, error) {
+  const isTooLarge =
+    error?.message === 'Payload Too Large'
+
+  sendJson(res, isTooLarge ? 413 : 400, {
+    success: false,
+    error: isTooLarge
+      ? 'Request body is too large.'
+      : error?.message || 'Invalid request body.',
+  })
+
+  return true
+}
+
+async function handleJsonEndpoint(
+  req,
+  res,
+  handler
+) {
+  try {
+    const body = await parseJsonBody(req)
+    const result = await handler(body)
+
+    sendJson(res, result.status, result.body)
+  } catch (error) {
+    return sendBodyError(res, error)
+  }
+
+  return true
+}
+
+export async function handleApiRequest(req, res) {
+  const url = new URL(
+    req.url,
+    `http://${req.headers.host || 'localhost'}`
+  )
+
+  const pathname =
+    url.pathname.replace(/\/+$/, '') || '/'
+
+  /* =======================================================
+     CORS PREFLIGHT
+  ======================================================= */
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods':
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers':
-        'Content-Type, Authorization, x-admin-token',
+        'Content-Type, Authorization, x-admin-token, x-customer-token',
       'Access-Control-Max-Age': '86400',
     })
+
     res.end()
     return true
   }
 
-  // Health endpoint
+  /* =======================================================
+     HEALTH
+  ======================================================= */
+
   if (pathname === '/api/health') {
+    if (req.method !== 'GET') {
+      return sendMethodNotAllowed(res)
+    }
+
     let dbStatus = 'disconnected'
+
     try {
       const pool = await getDbPool()
       await pool.query('SELECT 1')
-      dbStatus = isDbInMemory() ? 'in-memory-postgres' : 'connected-postgres'
-    } catch (err) {
-      dbStatus = 'disconnected: ' + (err.code || err.message)
+
+      dbStatus = isDbInMemory()
+        ? 'in-memory-postgres'
+        : 'connected-postgres'
+    } catch (error) {
+      dbStatus =
+        'disconnected: ' +
+        (error.code || error.message)
     }
 
     sendJson(res, 200, {
-      ok: dbStatus.startsWith('connected') || dbStatus.startsWith('in-memory'),
+      ok:
+        dbStatus.startsWith('connected') ||
+        dbStatus.startsWith('in-memory'),
       service: 'zen-cafe-api',
       database: dbStatus,
       timestamp: new Date().toISOString(),
     })
+
     return true
   }
 
-  // Admin login endpoint
+  /* =======================================================
+     ADMIN AUTHENTICATION
+  ======================================================= */
+
   if (pathname === '/api/admin/login') {
     if (req.method !== 'POST') {
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return true
+      return sendMethodNotAllowed(res)
     }
-    const body = await parseJsonBody(req)
-    const result = await handleAdminLogin(body, req)
-    sendJson(res, result.status, result.body)
-    return true
+
+    return handleJsonEndpoint(
+      req,
+      res,
+      body => handleAdminLogin(body, req)
+    )
   }
 
-  // Admin logout endpoint
   if (pathname === '/api/admin/logout') {
     const result = await handleAdminLogout(req)
+
     sendJson(res, result.status, result.body)
     return true
   }
 
-  // Admin auth check endpoint
   if (pathname === '/api/admin/check') {
     const result = await handleAdminCheck(req)
+
     sendJson(res, result.status, result.body)
     return true
   }
 
-  // ==========================================
-  // Customer Auth Endpoints (Phase 4)
-  // ==========================================
+  /* =======================================================
+     CUSTOMER REGISTRATION
 
-  // POST /api/auth/register
-  if (pathname === '/api/auth/register' && req.method === 'POST') {
-    try {
-      const body = await parseJsonBody(req)
-      const result = await handleCustomerRegister(req, res, body)
-      sendJson(res, result.status, result.body)
-      return true
-    } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message })
-      return true
+     POST /api/auth/register
+  ======================================================= */
+
+  if (pathname === '/api/auth/register') {
+    if (req.method !== 'POST') {
+      return sendMethodNotAllowed(res)
     }
+
+    return handleJsonEndpoint(
+      req,
+      res,
+      body => handleCustomerRegister(req, res, body)
+    )
   }
 
-  // GET /api/auth/verify or POST /api/auth/verify
+  /* =======================================================
+     CUSTOMER EMAIL VERIFICATION
+
+     GET /api/auth/verify?token=...
+     POST /api/auth/verify
+  ======================================================= */
+
   if (pathname === '/api/auth/verify') {
     if (req.method === 'GET') {
-      const rawToken = url.searchParams.get('token')
-      const result = await handleCustomerVerify(req, res, rawToken)
+      const token = url.searchParams.get('token')
+
+      const result = await handleCustomerVerify(
+        req,
+        res,
+        token
+      )
+
       sendJson(res, result.status, result.body)
       return true
     }
+
     if (req.method === 'POST') {
-      const body = await parseJsonBody(req)
-      const rawToken = body.token || url.searchParams.get('token')
-      const result = await handleCustomerVerify(req, res, rawToken)
-      sendJson(res, result.status, result.body)
-      return true
+      return handleJsonEndpoint(
+        req,
+        res,
+        async body => {
+          const token =
+            body.token ||
+            url.searchParams.get('token')
+
+          return handleCustomerVerify(
+            req,
+            res,
+            token
+          )
+        }
+      )
     }
-    sendJson(res, 405, { error: 'Method Not Allowed' })
-    return true
+
+    return sendMethodNotAllowed(res)
   }
 
-  // POST /api/auth/resend-verification
-  if (pathname === '/api/auth/resend-verification' && req.method === 'POST') {
-    try {
-      const body = await parseJsonBody(req)
-      const result = await handleResendVerification(req, res, body)
-      sendJson(res, result.status, result.body)
-      return true
-    } catch (err) {
-      sendJson(res, 400, { success: false, error: err.message })
-      return true
+  /* =======================================================
+     RESEND CUSTOMER VERIFICATION EMAIL
+
+     POST /api/auth/resend-verification
+  ======================================================= */
+
+  if (
+    pathname === '/api/auth/resend-verification'
+  ) {
+    if (req.method !== 'POST') {
+      return sendMethodNotAllowed(res)
     }
+
+    return handleJsonEndpoint(
+      req,
+      res,
+      body => handleResendVerification(req, res, body)
+    )
   }
 
-  // GET /api/auth/me
-  if (pathname === '/api/auth/me' && req.method === 'GET') {
+  /* =======================================================
+     EXISTING CUSTOMER SESSION ROUTES
+
+     Retained for compatibility with the existing
+     registration and customer account functionality.
+
+     These routes are NOT required for gallery uploads.
+  ======================================================= */
+
+  if (pathname === '/api/auth/me') {
+    if (req.method !== 'GET') {
+      return sendMethodNotAllowed(res)
+    }
+
     const result = await handleCustomerMe(req, res)
+
     sendJson(res, result.status, result.body)
     return true
   }
 
-  // POST /api/auth/logout
-  if (pathname === '/api/auth/logout' && req.method === 'POST') {
+  if (pathname === '/api/auth/logout') {
+    if (req.method !== 'POST') {
+      return sendMethodNotAllowed(res)
+    }
+
     const result = await handleCustomerLogout(req, res)
+
     sendJson(res, result.status, result.body)
     return true
   }
-    // ==========================================
-  // Secure Community Gallery Email Sign-In
-  // ==========================================
 
-  // POST /api/auth/gallery-login/request
-  if (pathname === '/api/auth/gallery-login/request' && req.method === 'POST') {
-    try {
-      const body = await parseJsonBody(req)
-      const result = await handleGalleryLoginRequest(req, res, body)
-      sendJson(res, result.status, result.body)
-      return true
-    } catch (err) {
-      console.error('Gallery login request error:', err)
-      sendJson(res, 400, {
-        success: false,
-        error: 'Invalid request.',
-      })
-      return true
-    }
+  /* =======================================================
+     DISABLE OLD GALLERY LOGIN ROUTES
+
+     No Returning Customer login.
+     No magic-link sign-in.
+  ======================================================= */
+
+  if (
+    pathname === '/api/auth/gallery-login/request' ||
+    pathname === '/api/auth/gallery-login/verify'
+  ) {
+    sendJson(res, 410, {
+      success: false,
+      error:
+        'Gallery sign-in has been discontinued. Please use the Community Gallery email check.',
+    })
+
+    return true
   }
 
-  // POST /api/auth/gallery-login/verify
-  if (pathname === '/api/auth/gallery-login/verify' && req.method === 'POST') {
-    try {
-      const body = await parseJsonBody(req)
-      const result = await handleGalleryLoginVerify(req, res, body)
-      sendJson(res, result.status, result.body)
-      return true
-    } catch (err) {
-      console.error('Gallery login verification error:', err)
-      sendJson(res, 400, {
-        success: false,
-        error: 'Invalid sign-in request.',
-      })
-      return true
+  /* =======================================================
+     COMMUNITY GALLERY EMAIL CHECK
+
+     POST /api/gallery/check-email
+
+     Checks:
+     - Registered customer
+     - Verified email
+     - Active customer
+     - Upload cooldown
+
+     No customer session required.
+
+     This is handled here ONLY.
+  ======================================================= */
+
+  if (pathname === '/api/gallery/check-email') {
+    if (req.method !== 'POST') {
+      return sendMethodNotAllowed(res)
     }
+
+    return handleJsonEndpoint(
+      req,
+      res,
+      body => handleGalleryCheckEmail(req, res, body)
+    )
   }
 
-  // POST /api/gallery/check-email (Gallery readiness)
-  if (pathname === '/api/gallery/check-email' && req.method === 'POST') {
-    try {
-      const body = await parseJsonBody(req)
-      const result = await handleGalleryCheckEmail(req, res, body)
-      sendJson(res, result.status, result.body)
-      return true
-    } catch (err) {
-      sendJson(res, 400, { success: false, message: err.message })
-      return true
-    }
-  }
+  /* =======================================================
+     PRODUCTS
+  ======================================================= */
 
-  // ==========================================
-  // /api/products endpoints
-  // ==========================================
   if (pathname === '/api/products') {
     try {
       if (req.method === 'GET') {
-        const result = await handleGetProducts(url, req)
+        const result = await handleGetProducts(
+          url,
+          req
+        )
+
         sendJson(res, result.status, result.body)
         return true
       }
 
       if (req.method === 'POST') {
-        const body = await parseJsonBody(req)
-        const result = await handleCreateProduct(body, req)
-        sendJson(res, result.status, result.body)
-        return true
+        return handleJsonEndpoint(
+          req,
+          res,
+          body => handleCreateProduct(body, req)
+        )
       }
 
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    } catch (err) {
-      console.error('API Error in /api/products:', err)
+      return sendMethodNotAllowed(res)
+    } catch (error) {
+      console.error(
+        'API Error in /api/products:',
+        error
+      )
+
       sendJson(res, 500, {
         success: false,
-        error: err.message || 'Internal Server Error',
+        error:
+          error.message || 'Internal Server Error',
       })
+
       return true
     }
   }
 
-  // /api/products/:id
-  const productMatch = pathname.match(/^\/api\/products\/([^/]+)$/)
+  const productMatch = pathname.match(
+    /^\/api\/products\/([^/]+)$/
+  )
+
   if (productMatch) {
-    const id = decodeURIComponent(productMatch[1])
+    const id = decodeURIComponent(
+      productMatch[1]
+    )
+
     try {
       if (req.method === 'GET') {
         const result = await handleGetProductById(id)
+
         sendJson(res, result.status, result.body)
         return true
       }
 
-      if (req.method === 'PUT' || req.method === 'PATCH') {
-        const body = await parseJsonBody(req)
-        const result = await handleUpdateProduct(id, body, req)
-        sendJson(res, result.status, result.body)
-        return true
+      if (
+        req.method === 'PUT' ||
+        req.method === 'PATCH'
+      ) {
+        return handleJsonEndpoint(
+          req,
+          res,
+          body => handleUpdateProduct(id, body, req)
+        )
       }
 
       if (req.method === 'DELETE') {
-        const result = await handleDeleteProduct(id, req)
+        const result = await handleDeleteProduct(
+          id,
+          req
+        )
+
         sendJson(res, result.status, result.body)
         return true
       }
 
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    } catch (err) {
-      console.error(`API Error in /api/products/${id}:`, err)
+      return sendMethodNotAllowed(res)
+    } catch (error) {
+      console.error(
+        `API Error in /api/products/${id}:`,
+        error
+      )
+
       sendJson(res, 500, {
         success: false,
-        error: err.message || 'Internal Server Error',
+        error:
+          error.message || 'Internal Server Error',
       })
+
       return true
     }
   }
 
-  // ==========================================
-  // /api/offers endpoints
-  // ==========================================
+  /* =======================================================
+     OFFERS
+  ======================================================= */
+
   if (pathname === '/api/offers') {
     try {
       if (req.method === 'GET') {
-        const result = await handleGetOffers(url, req)
+        const result = await handleGetOffers(
+          url,
+          req
+        )
+
         sendJson(res, result.status, result.body)
         return true
       }
 
       if (req.method === 'POST') {
-        const body = await parseJsonBody(req)
-        const result = await handleCreateOffer(body, req)
-        sendJson(res, result.status, result.body)
-        return true
+        return handleJsonEndpoint(
+          req,
+          res,
+          body => handleCreateOffer(body, req)
+        )
       }
 
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    } catch (err) {
-      console.error('API Error in /api/offers:', err)
+      return sendMethodNotAllowed(res)
+    } catch (error) {
+      console.error(
+        'API Error in /api/offers:',
+        error
+      )
+
       sendJson(res, 500, {
         success: false,
-        error: err.message || 'Internal Server Error',
+        error:
+          error.message || 'Internal Server Error',
       })
+
       return true
     }
   }
 
-  // /api/offers/:id
-  const offerMatch = pathname.match(/^\/api\/offers\/([^/]+)$/)
+  const offerMatch = pathname.match(
+    /^\/api\/offers\/([^/]+)$/
+  )
+
   if (offerMatch) {
-    const id = decodeURIComponent(offerMatch[1])
+    const id = decodeURIComponent(
+      offerMatch[1]
+    )
+
     try {
       if (req.method === 'GET') {
         const result = await handleGetOfferById(id)
+
         sendJson(res, result.status, result.body)
         return true
       }
 
-      if (req.method === 'PUT' || req.method === 'PATCH') {
-        const body = await parseJsonBody(req)
-        const result = await handleUpdateOffer(id, body, req)
-        sendJson(res, result.status, result.body)
-        return true
+      if (
+        req.method === 'PUT' ||
+        req.method === 'PATCH'
+      ) {
+        return handleJsonEndpoint(
+          req,
+          res,
+          body => handleUpdateOffer(id, body, req)
+        )
       }
 
       if (req.method === 'DELETE') {
-        const result = await handleDeleteOffer(id, req)
+        const result = await handleDeleteOffer(
+          id,
+          req
+        )
+
         sendJson(res, result.status, result.body)
         return true
       }
 
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return true
-    } catch (err) {
-      console.error(`API Error in /api/offers/${id}:`, err)
+      return sendMethodNotAllowed(res)
+    } catch (error) {
+      console.error(
+        `API Error in /api/offers/${id}:`,
+        error
+      )
+
       sendJson(res, 500, {
         success: false,
-        error: err.message || 'Internal Server Error',
+        error:
+          error.message || 'Internal Server Error',
       })
+
       return true
     }
   }
 
-  // ==========================================
-  // /api/bookings endpoints
-  // ==========================================
+  /* =======================================================
+     BOOKINGS
+  ======================================================= */
+
   if (pathname.startsWith('/api/bookings')) {
     await handleBookingsRoute(req, res, url)
     return true
   }
 
-  // ==========================================
-  // /api/gallery endpoints
-  // ==========================================
+  /* =======================================================
+     COMMUNITY GALLERY
+
+     Includes:
+     GET  /api/gallery/public
+     POST /api/gallery/upload
+     Admin gallery routes
+     Gallery image delivery
+
+     Upload authorization is implemented in gallery.mjs,
+     not through customer session middleware here.
+  ======================================================= */
+
   if (pathname.startsWith('/api/gallery')) {
-    const handled = await handleGalleryRoute(req, res, url)
+    const handled = await handleGalleryRoute(
+      req,
+      res,
+      url
+    )
+
     if (handled) return true
   }
 
-  // ==========================================
-  // /api/games endpoints (Phase 6)
-  // ==========================================
+  /* =======================================================
+     GAMES
+  ======================================================= */
+
   if (pathname.startsWith('/api/games')) {
-    const handled = await handleGamesRoute(req, res, url)
+    const handled = await handleGamesRoute(
+      req,
+      res,
+      url
+    )
+
     if (handled) return true
   }
 
-  // ==========================================
-  // /api/settings endpoints & admin password change (Phase 6)
-  // ==========================================
-  if (pathname.startsWith('/api/settings') || pathname === '/api/admin/change-password') {
-    const handled = await handleSettingsRoute(req, res, url)
-    if (handled) return true
-  }
-    // ==========================================
-  // Admin Notifications Endpoints
-  // ==========================================
-  if (pathname.startsWith('/api/admin/notifications')) {
-    const handled = await handleAdminNotificationsRoute(req, res, url)
+  /* =======================================================
+     SETTINGS AND ADMIN PASSWORD CHANGE
+  ======================================================= */
+
+  if (
+    pathname.startsWith('/api/settings') ||
+    pathname === '/api/admin/change-password'
+  ) {
+    const handled = await handleSettingsRoute(
+      req,
+      res,
+      url
+    )
+
     if (handled) return true
   }
 
-  // Unhandled /api route
+  /* =======================================================
+     ADMIN NOTIFICATIONS
+  ======================================================= */
+
+  if (
+    pathname.startsWith('/api/admin/notifications')
+  ) {
+    const handled =
+      await handleAdminNotificationsRoute(
+        req,
+        res,
+        url
+      )
+
+    if (handled) return true
+  }
+
+  /* =======================================================
+     UNHANDLED API ROUTES
+  ======================================================= */
+
   if (pathname.startsWith('/api')) {
-    // If an external proxy target is specified and running, let caller handle or return 404
     return false
   }
 

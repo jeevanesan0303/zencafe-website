@@ -37,6 +37,7 @@ type PhotoShape = 'portrait' | 'square' | 'landscape' | 'wide'
 type AccessResponse = {
   success: boolean
   registered?: boolean
+  verified?: boolean
   canUpload?: boolean
   maxUploads?: number
   nextUploadAt?: string | null
@@ -50,12 +51,9 @@ type UploadResponse = {
   error?: string
   uploadedCount?: number
   nextUploadAt?: string | null
-}
-
-type SelectedPhoto = {
-  id: string
-  file: File
-  preview: string
+  details?: {
+    nextUploadAt?: string
+  }
 }
 
 type PublicPhoto = {
@@ -68,7 +66,7 @@ type PublicPhoto = {
   image?: string
   imageUrl?: string
   image_url?: string
-  createdAt?: number
+  createdAt?: string | number
   created_at?: string
   likes?: number
 }
@@ -80,6 +78,12 @@ type PublicResponse = {
   error?: string
 }
 
+type SelectedPhoto = {
+  id: string
+  file: File
+  preview: string
+}
+
 type LikeRecord = {
   count: number
   liked: boolean
@@ -88,11 +92,12 @@ type LikeRecord = {
 const API = '/api/gallery'
 const MAX_PHOTOS = 2
 const MAX_FILE_SIZE = 5 * 1024 * 1024
+const MAX_BATCH_SIZE = 14 * 1024 * 1024
 const AUTO_SLIDE_MS = 3800
 
 const LIKES_KEY = 'zen-cafe-gallery-likes-v124'
-const CUSTOMER_PROFILE_KEY = 'zen-cafe-customer-registration-v149'
-const CUSTOMER_SESSION_KEY = 'zen-cafe-customer-session-token-v1'
+const CUSTOMER_PROFILE_KEY =
+  'zen-cafe-customer-registration-v149'
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase()
@@ -105,16 +110,12 @@ function emailLooksValid(value: string): boolean {
 }
 
 function formatRemaining(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000))
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const seconds = total % 60
+  const seconds = Math.max(0, Math.ceil(ms / 1000))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainingSeconds = seconds % 60
 
-  return [
-    hours,
-    minutes,
-    seconds,
-  ]
+  return [hours, minutes, remainingSeconds]
     .map(value => String(value).padStart(2, '0'))
     .join(':')
 }
@@ -122,7 +123,6 @@ function formatRemaining(ms: number): string {
 function readLikeMap(): Record<string, LikeRecord> {
   try {
     const raw = localStorage.getItem(LIKES_KEY)
-
     if (!raw) return {}
 
     const parsed: unknown = JSON.parse(raw)
@@ -141,20 +141,25 @@ function readLikeMap(): Record<string, LikeRecord> {
   }
 }
 
-function saveLikeMap(map: Record<string, LikeRecord>): void {
+function saveLikeMap(
+  map: Record<string, LikeRecord>,
+): void {
   try {
     localStorage.setItem(LIKES_KEY, JSON.stringify(map))
   } catch {
-    // Local likes are optional.
+    // Likes are stored locally and are optional.
   }
 }
 
-async function readApiResponse<T>(response: Response): Promise<T> {
-  const contentType = response.headers.get('content-type') || ''
+async function readApiResponse<T>(
+  response: Response,
+): Promise<T> {
+  const contentType =
+    response.headers.get('content-type') || ''
 
   if (!contentType.includes('application/json')) {
     throw new Error(
-      'The gallery service is unavailable. Please try again later.',
+      'The gallery service is unavailable. Please try again.',
     )
   }
 
@@ -171,25 +176,40 @@ function getErrorMessage(
   return data.message || data.error || fallback
 }
 
-function normalizePublicPhotos(photos: PublicPhoto[]): Post[] {
+function parseTimestamp(
+  value: string | number | undefined,
+): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  const timestamp =
+    typeof value === 'number'
+      ? value
+      : /^\d+$/.test(value)
+        ? Number(value)
+        : new Date(value).getTime()
+
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : undefined
+}
+
+function normalizePublicPhotos(
+  photos: PublicPhoto[],
+): Post[] {
   const likes = readLikeMap()
 
   return photos
-    .filter(photo => {
-      return Boolean(
+    .filter(photo =>
+      Boolean(
         photo.imageUrl ||
-        photo.image_url ||
-        photo.image,
-      )
-    })
+          photo.image_url ||
+          photo.image,
+      ),
+    )
     .map(photo => {
       const id = String(photo.id)
-
-      const timestamp = photo.createdAt
-        ? Number(photo.createdAt)
-        : photo.created_at
-          ? new Date(photo.created_at).getTime()
-          : undefined
 
       return {
         id,
@@ -210,10 +230,9 @@ function normalizePublicPhotos(photos: PublicPhoto[]): Post[] {
         likes:
           likes[id]?.count ??
           Number(photo.likes ?? 0),
-        createdAt:
-          timestamp && Number.isFinite(timestamp)
-            ? timestamp
-            : undefined,
+        createdAt: parseTimestamp(
+          photo.createdAt ?? photo.created_at,
+        ),
       }
     })
 }
@@ -223,35 +242,41 @@ export default function CommunityGallery({
 }: {
   toast: (message: string) => void
 }) {
-  // Only approved API photos are displayed.
-  // No seed images or mock gallery records.
   const [posts, setPosts] = useState<Post[]>([])
-  const [galleryLoading, setGalleryLoading] = useState(true)
-  const [galleryError, setGalleryError] = useState('')
+  const [galleryLoading, setGalleryLoading] =
+    useState(true)
+  const [galleryError, setGalleryError] =
+    useState('')
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [caption, setCaption] = useState('')
 
-  const [photos, setPhotos] = useState<SelectedPhoto[]>([])
+  const [photos, setPhotos] =
+    useState<SelectedPhoto[]>([])
 
   const [checking, setChecking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [uploaded, setUploaded] = useState(false)
 
-  const [verifiedEmail, setVerifiedEmail] = useState('')
-  const [registered, setRegistered] = useState(false)
+  const [checkedEmail, setCheckedEmail] =
+    useState('')
+  const [registered, setRegistered] =
+    useState(false)
   const [eligible, setEligible] = useState(false)
 
-  const [maxUploads, setMaxUploads] = useState(MAX_PHOTOS)
-  const [nextUploadAt, setNextUploadAt] = useState<string | null>(
-    null,
-  )
+  const [maxUploads, setMaxUploads] =
+    useState(MAX_PHOTOS)
+
+  const [nextUploadAt, setNextUploadAt] =
+    useState<string | null>(null)
 
   const [now, setNow] = useState(Date.now())
 
-  const [lightbox, setLightbox] = useState<Post | null>(null)
-  const [lightboxClosing, setLightboxClosing] = useState(false)
+  const [lightbox, setLightbox] =
+    useState<Post | null>(null)
+  const [lightboxClosing, setLightboxClosing] =
+    useState(false)
 
   const [active, setActive] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -275,9 +300,12 @@ export default function CommunityGallery({
   const touch = useRef<number | null>(null)
   const navLock = useRef(false)
   const resumeTimer = useRef<number | null>(null)
+  const closeTimer = useRef<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const photosRef = useRef<SelectedPhoto[]>([])
   const emailRef = useRef<HTMLInputElement>(null)
+  const photosRef = useRef<SelectedPhoto[]>([])
+  const checkRequestId = useRef(0)
+  const mounted = useRef(true)
 
   const normalizedEmail = normalizeEmail(email)
 
@@ -292,7 +320,7 @@ export default function CommunityGallery({
 
   const emailConfirmed =
     registered &&
-    verifiedEmail === normalizedEmail &&
+    checkedEmail === normalizedEmail &&
     emailLooksValid(normalizedEmail)
 
   const canUpload =
@@ -336,10 +364,22 @@ export default function CommunityGallery({
   }, [photos])
 
   useEffect(() => {
+    mounted.current = true
+
     return () => {
+      mounted.current = false
+
       photosRef.current.forEach(photo => {
         URL.revokeObjectURL(photo.preview)
       })
+
+      if (resumeTimer.current !== null) {
+        window.clearTimeout(resumeTimer.current)
+      }
+
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current)
+      }
     }
   }, [])
 
@@ -351,10 +391,13 @@ export default function CommunityGallery({
     return () => window.clearInterval(timer)
   }, [])
 
-  // Pre-fill the customer's details without granting upload access.
+  // Saved details are used only to prefill the form.
+  // They never grant gallery upload permission.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(CUSTOMER_PROFILE_KEY)
+      const raw = localStorage.getItem(
+        CUSTOMER_PROFILE_KEY,
+      )
 
       if (!raw) return
 
@@ -371,13 +414,15 @@ export default function CommunityGallery({
         setName(profile.name)
       }
     } catch {
-      // The form remains usable without a saved profile.
+      // Continue with an empty form.
     }
   }, [])
 
   async function loadApprovedPhotos(
     signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) return
+
     setGalleryLoading(true)
     setGalleryError('')
 
@@ -391,9 +436,8 @@ export default function CommunityGallery({
         signal,
       })
 
-      const data = await readApiResponse<PublicResponse>(
-        response,
-      )
+      const data =
+        await readApiResponse<PublicResponse>(response)
 
       if (!response.ok || !data.success) {
         throw new Error(
@@ -408,21 +452,24 @@ export default function CommunityGallery({
         throw new Error('Invalid gallery response.')
       }
 
-      if (signal?.aborted) return
+      if (signal?.aborted || !mounted.current) {
+        return
+      }
 
       setPosts(normalizePublicPhotos(data.photos))
       setActive(0)
     } catch (error) {
-      if (signal?.aborted) return
+      if (signal?.aborted || !mounted.current) {
+        return
+      }
 
-      setPosts([])
       setGalleryError(
         error instanceof Error
           ? error.message
           : 'Unable to load gallery photos.',
       )
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && mounted.current) {
         setGalleryLoading(false)
       }
     }
@@ -433,9 +480,7 @@ export default function CommunityGallery({
 
     void loadApprovedPhotos(controller.signal)
 
-    return () => {
-      controller.abort()
-    }
+    return () => controller.abort()
   }, [])
 
   useEffect(() => {
@@ -448,62 +493,51 @@ export default function CommunityGallery({
     }
 
     const timer = window.setInterval(() => {
-      setActive(current => {
-        return (current + 1) % posts.length
-      })
+      setActive(current =>
+        (current + 1) % posts.length,
+      )
     }, AUTO_SLIDE_MS)
 
     return () => window.clearInterval(timer)
-  }, [
-    posts.length,
-    paused,
-    lightbox,
-  ])
+  }, [posts.length, paused, lightbox])
 
   useEffect(() => {
     if (active >= posts.length) {
       setActive(0)
     }
-  }, [
-    active,
-    posts.length,
-  ])
-
-  useEffect(() => {
-    return () => {
-      if (resumeTimer.current !== null) {
-        window.clearTimeout(resumeTimer.current)
-      }
-    }
-  }, [])
+  }, [active, posts.length])
 
   useEffect(() => {
     if (!lightbox) return
 
-    const previousOverflow = document.body.style.overflow
+    const previousOverflow =
+      document.body.style.overflow
 
     document.body.style.overflow = 'hidden'
-    document.body.classList.add('zen-gallery-lightbox-open')
+    document.body.classList.add(
+      'zen-gallery-lightbox-open',
+    )
 
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setLightboxClosing(true)
-
-        window.setTimeout(() => {
-          setLightbox(null)
-          setLightboxClosing(false)
-        }, 280)
+        closeLightbox()
       }
     }
 
     window.addEventListener('keydown', onKey)
 
     return () => {
-      document.body.style.overflow = previousOverflow
+      document.body.style.overflow =
+        previousOverflow
+
       document.body.classList.remove(
         'zen-gallery-lightbox-open',
       )
-      window.removeEventListener('keydown', onKey)
+
+      window.removeEventListener(
+        'keydown',
+        onKey,
+      )
     }
   }, [lightbox])
 
@@ -521,55 +555,72 @@ export default function CommunityGallery({
   }
 
   function resetAccess(): void {
+    checkRequestId.current += 1
+
     setRegistered(false)
     setEligible(false)
-    setVerifiedEmail('')
+    setCheckedEmail('')
     setNextUploadAt(null)
     setMaxUploads(MAX_PHOTOS)
     setUploaded(false)
+
     clearPhotos()
   }
 
   function handleEmailChange(value: string): void {
+    if (busy) return
+
     setEmail(value)
 
-    if (normalizeEmail(value) !== verifiedEmail) {
+    if (normalizeEmail(value) !== checkedEmail) {
       resetAccess()
     }
   }
 
-  // Check the verified email against the server.
-  // The server remains responsible for upload authorization.
+  // Registered email is checked directly with PostgreSQL
+  // through the backend. No customer session is required.
   async function checkEmail(): Promise<void> {
+    if (checking || busy) return
+
     if (!emailLooksValid(email)) {
       toast('Please enter a valid email address.')
       emailRef.current?.focus()
       return
     }
 
-    const checkedEmail = normalizeEmail(email)
+    const targetEmail = normalizeEmail(email)
+    const requestId = ++checkRequestId.current
 
     setChecking(true)
     setRegistered(false)
     setEligible(false)
-    setVerifiedEmail('')
+    setCheckedEmail('')
     setUploaded(false)
 
     try {
-      const response = await fetch(`${API}/check-email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const response = await fetch(
+        `${API}/check-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            email: targetEmail,
+          }),
         },
-        body: JSON.stringify({
-          email: checkedEmail,
-        }),
-      })
-
-      const data = await readApiResponse<AccessResponse>(
-        response,
       )
+
+      const data =
+        await readApiResponse<AccessResponse>(response)
+
+      if (
+        !mounted.current ||
+        requestId !== checkRequestId.current
+      ) {
+        return
+      }
 
       if (!response.ok || !data.success) {
         throw new Error(
@@ -589,44 +640,55 @@ export default function CommunityGallery({
         return
       }
 
-      setRegistered(true)
-      setVerifiedEmail(checkedEmail)
-
-      setMaxUploads(
-        Math.max(
-          0,
-          Math.min(
-            MAX_PHOTOS,
-            data.maxUploads ?? MAX_PHOTOS,
-          ),
+      const allowedCount = Math.max(
+        0,
+        Math.min(
+          MAX_PHOTOS,
+          Number(data.maxUploads ?? MAX_PHOTOS),
         ),
       )
 
+      setRegistered(true)
+      setCheckedEmail(targetEmail)
+      setMaxUploads(allowedCount)
       setNextUploadAt(data.nextUploadAt || null)
       setNow(Date.now())
-
       setEligible(Boolean(data.canUpload))
 
       if (data.canUpload) {
         toast(
-          'Your registered email is eligible for photo uploads.',
+          'Registered email verified. You can now upload your photos.',
         )
       } else {
         toast(
           data.message ||
-            'Photo uploads are not available for this email yet.',
+            'Photo uploads are not available yet.',
         )
       }
     } catch (error) {
+      if (
+        !mounted.current ||
+        requestId !== checkRequestId.current
+      ) {
+        return
+      }
+
       resetAccess()
 
       toast(
         error instanceof Error
           ? error.message
-          : 'Unable to check your registered email.',
+          : 'Unable to check your email.',
       )
     } finally {
-      setChecking(false)
+      if (
+        mounted.current &&
+        requestId === checkRequestId.current
+      ) {
+        setChecking(false)
+      } else if (mounted.current) {
+        setChecking(false)
+      }
     }
   }
 
@@ -638,7 +700,9 @@ export default function CommunityGallery({
     )
 
     if (!canUpload) {
-      toast('Please check your registered email first.')
+      toast(
+        'Please check your registered email first.',
+      )
       event.target.value = ''
       return
     }
@@ -659,6 +723,8 @@ export default function CommunityGallery({
       'image/webp',
     ]
 
+    let totalSize = 0
+
     for (const file of selected) {
       if (!allowedTypes.includes(file.type)) {
         toast(
@@ -668,30 +734,33 @@ export default function CommunityGallery({
         return
       }
 
-      if (file.size > MAX_FILE_SIZE) {
+      if (
+        file.size === 0 ||
+        file.size > MAX_FILE_SIZE
+      ) {
         toast(
-          'Each photo must be 5 MB or smaller.',
+          'Each photo must be between 1 byte and 5 MB.',
         )
         event.target.value = ''
         return
       }
 
-      if (file.size === 0) {
-        toast('Empty image files cannot be uploaded.')
-        event.target.value = ''
-        return
-      }
+      totalSize += file.size
+    }
+
+    if (totalSize > MAX_BATCH_SIZE) {
+      toast('The selected photos are too large.')
+      event.target.value = ''
+      return
     }
 
     clearPhotos()
 
-    const prepared: SelectedPhoto[] = selected.map(
-      file => ({
-        id: crypto.randomUUID(),
-        file,
-        preview: URL.createObjectURL(file),
-      }),
-    )
+    const prepared = selected.map(file => ({
+      id: crypto.randomUUID(),
+      file,
+      preview: URL.createObjectURL(file),
+    }))
 
     photosRef.current = prepared
     setPhotos(prepared)
@@ -699,7 +768,9 @@ export default function CommunityGallery({
 
     toast(
       `${prepared.length} ${
-        prepared.length === 1 ? 'photo is' : 'photos are'
+        prepared.length === 1
+          ? 'photo is'
+          : 'photos are'
       } ready to upload.`,
     )
   }
@@ -709,8 +780,12 @@ export default function CommunityGallery({
   ): Promise<void> {
     event.preventDefault()
 
+    if (busy || checking) return
+
     if (!emailConfirmed || !eligible) {
-      toast('Check your registered email first.')
+      toast(
+        'Please check your registered email first.',
+      )
       return
     }
 
@@ -757,36 +832,36 @@ export default function CommunityGallery({
       )
     })
 
-    const token = localStorage.getItem(
-      CUSTOMER_SESSION_KEY,
-    )
-
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-    }
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`
-    }
-
     setBusy(true)
     setUploaded(false)
 
     try {
-      const response = await fetch(`${API}/upload`, {
-        method: 'POST',
-        headers,
-        body: form,
-      })
-
-      const data = await readApiResponse<UploadResponse>(
-        response,
+      // No Authorization header.
+      // No customer session token.
+      // Server checks the registered email directly.
+      const response = await fetch(
+        `${API}/upload`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+          },
+          body: form,
+        },
       )
 
+      const data =
+        await readApiResponse<UploadResponse>(response)
+
       if (!response.ok || !data.success) {
-        if (data.nextUploadAt) {
-          setNextUploadAt(data.nextUploadAt)
+        const cooldownDate =
+          data.nextUploadAt ||
+          data.details?.nextUploadAt
+
+        if (cooldownDate) {
+          setNextUploadAt(cooldownDate)
           setNow(Date.now())
+          setEligible(false)
         }
 
         throw new Error(
@@ -803,12 +878,14 @@ export default function CommunityGallery({
 
       setCaption('')
       clearPhotos()
-
       setUploaded(true)
 
       toast(
-        'Photos uploaded successfully. They will appear after approval.',
+        'Photos uploaded successfully! Your photos are now visible in the Community Gallery.',
       )
+
+      // Immediately reload published photos.
+      await loadApprovedPhotos()
     } catch (error) {
       toast(
         error instanceof Error
@@ -816,11 +893,17 @@ export default function CommunityGallery({
           : 'Unable to upload photos. Please try again.',
       )
     } finally {
-      setBusy(false)
+      if (mounted.current) {
+        setBusy(false)
+      }
     }
   }
 
   function openLightbox(post: Post): void {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current)
+    }
+
     setLightboxClosing(false)
     setLightbox(post)
   }
@@ -830,9 +913,10 @@ export default function CommunityGallery({
 
     setLightboxClosing(true)
 
-    window.setTimeout(() => {
+    closeTimer.current = window.setTimeout(() => {
       setLightbox(null)
       setLightboxClosing(false)
+      closeTimer.current = null
     }, 280)
   }
 
@@ -847,13 +931,10 @@ export default function CommunityGallery({
     navLock.current = true
     setPaused(true)
 
-    setActive(current => {
-      return (
-        current +
-        direction +
-        posts.length
-      ) % posts.length
-    })
+    setActive(current =>
+      (current + direction + posts.length) %
+      posts.length,
+    )
 
     window.setTimeout(() => {
       navLock.current = false
@@ -918,6 +999,15 @@ export default function CommunityGallery({
       ),
     )
 
+    setLightbox(previous =>
+      previous?.id === id
+        ? {
+            ...previous,
+            likes: nextCount,
+          }
+        : previous,
+    )
+
     setLikedIds(previous => ({
       ...previous,
       [id]: !wasLiked,
@@ -938,11 +1028,8 @@ export default function CommunityGallery({
 
     if (!count) return 'back'
 
-    const diff = (
-      index -
-      active +
-      count
-    ) % count
+    const diff =
+      (index - active + count) % count
 
     if (diff === 0) return 'center'
     if (diff === 1) return 'right'
@@ -1000,9 +1087,10 @@ export default function CommunityGallery({
           </div>
 
           <p className="section-copy lg:justify-self-end">
-            Registered and verified guests can share up to
-            two photos. A 24-hour cooldown begins after
-            a successful upload. Photos appear after approval.
+            Registered and verified guests can share up
+            to two photos. Your photos appear immediately
+            after a successful upload. You can upload
+            again after 24 hours.
           </p>
         </div>
 
@@ -1042,11 +1130,14 @@ export default function CommunityGallery({
                     type="email"
                     value={email}
                     onChange={event =>
-                      handleEmailChange(event.target.value)
+                      handleEmailChange(
+                        event.target.value,
+                      )
                     }
                     className="field-input !pl-11"
                     placeholder="you@example.com"
                     autoComplete="email"
+                    disabled={busy}
                     required
                   />
                 </div>
@@ -1103,10 +1194,10 @@ export default function CommunityGallery({
                           cooldownRemaining,
                         )}.`
                       : canUpload
-                        ? `Your email is eligible. You can upload up to ${maxUploads} photos.`
+                        ? `Your email is verified. Upload up to ${maxUploads} photos.`
                         : emailConfirmed
-                          ? 'Photo uploads are not currently available for this email.'
-                          : 'Enter your registered and verified email to check upload eligibility.'}
+                          ? 'Uploads are not available for this email yet.'
+                          : 'Enter your registered email and check eligibility.'}
                   </p>
                 </div>
 
@@ -1230,8 +1321,8 @@ export default function CommunityGallery({
             {uploaded && (
               <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#2f7d55]/15 bg-[#eaf6ef] px-4 py-3 text-[11px] font-semibold text-[#315b46]">
                 <CheckCircle2 size={17} />
-                Photos uploaded successfully.
-                Waiting for approval.
+                Photos uploaded successfully and
+                published to the Community Gallery.
               </div>
             )}
           </form>
@@ -1305,7 +1396,7 @@ export default function CommunityGallery({
                         ? 'Please wait while we load the gallery.'
                         : galleryError
                           ? galleryError
-                          : 'No approved guest photos yet. Be among the first to share a Zen moment.'}
+                          : 'No guest photos yet. Be among the first to share a Zen moment.'}
                     </p>
 
                     {galleryError && (
@@ -1328,14 +1419,14 @@ export default function CommunityGallery({
                   photoShapes[post.id] ||
                   'landscape'
 
+                const position = role(index)
+
                 return (
                   <article
                     key={post.id}
-                    className={`gallery-slide gallery-slide-${role(
-                      index,
-                    )} gallery-shape-${shape}`}
+                    className={`gallery-slide gallery-slide-${position} gallery-shape-${shape}`}
                     aria-hidden={
-                      role(index) !== 'center'
+                      position !== 'center'
                     }
                   >
                     <button
@@ -1344,6 +1435,7 @@ export default function CommunityGallery({
                         openLightbox(post)
                       }
                       className="gallery-slide-media gallery-photo-trigger"
+                      aria-label={`View photo by ${post.user}`}
                     >
                       <img
                         src={post.image}
@@ -1351,7 +1443,7 @@ export default function CommunityGallery({
                         aria-hidden="true"
                         className="gallery-slide-backdrop"
                         loading={
-                          role(index) === 'center'
+                          position === 'center'
                             ? 'eager'
                             : 'lazy'
                         }
@@ -1362,7 +1454,7 @@ export default function CommunityGallery({
                         alt={post.caption}
                         className="gallery-slide-photo"
                         loading={
-                          role(index) === 'center'
+                          position === 'center'
                             ? 'eager'
                             : 'lazy'
                         }
@@ -1480,6 +1572,7 @@ export default function CommunityGallery({
                   }`}
                 >
                   <span />
+
                   <small>
                     {paused
                       ? 'Paused'
