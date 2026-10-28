@@ -137,7 +137,7 @@ async function deliverVerificationEmail({ name, email, rawToken, hostHeader }) {
   const creds = checkNotificationCredentials()
   const protocol = hostHeader?.includes('localhost') ? 'http' : 'https'
   const host = hostHeader || 'localhost:3000'
-  const verifyUrl = `${protocol}://${host}/register?verify=${encodeURIComponent(rawToken)}`
+  const verifyUrl = `https://zencafe-website.purple-forest-fa52.workers.dev/register.html?verify=${encodeURIComponent(rawToken)}`
 
   if (creds.email.configured) {
     const { subject, html } = buildBrandedVerificationEmail({ name, verifyUrl })
