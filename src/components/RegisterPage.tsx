@@ -393,7 +393,7 @@ export default function RegisterPage() {
                 />
               </div>
             </label>
-
+</div>
             <label className="field-label">
               Phone number
               <div className="zen-register-input">
@@ -430,25 +430,6 @@ export default function RegisterPage() {
                 />
               </div>
             </label>
-
-            <label className="field-label zen-register-field-full">
-              Password (optional)
-              <div className="zen-register-input">
-                <Lock size={17} />
-                <input
-                  value={password}
-                  disabled={loading}
-                  onChange={e => {
-                    setPassword(e.target.value)
-                    setMessage('')
-                  }}
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder="Create a password (min 6 characters)"
-                />
-              </div>
-            </label>
-          </div>
 
           <button
             className="primary-pill zen-register-submit"
