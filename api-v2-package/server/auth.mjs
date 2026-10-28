@@ -371,3 +371,278 @@ export async function handleAdminCheck(req) {
     body: { authenticated: true, email: session.email, expiresAt: session.expiresAt },
   }
 }
+
+const GALLERY_LOGIN_LINK_MINUTES = 15
+const GALLERY_LOGIN_BASE_URL =
+  process.env.ZEN_CAFE_PUBLIC_URL ||
+  'https://zencafe-website.purple-forest-fa52.workers.dev'
+
+/**
+ * Request a secure gallery sign-in link.
+ * POST /api/auth/gallery-login/request
+ */
+export async function handleGalleryLoginRequest(req, res, body) {
+  const email = normalizeEmail(body?.email)
+
+  if (!isValidEmail(email)) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: 'Please enter a valid email address.',
+      },
+    }
+  }
+
+  const clientIp = String(
+    req.headers['cf-connecting-ip'] ||
+    req.headers['x-forwarded-for'] ||
+    req.socket?.remoteAddress ||
+    'unknown'
+  ).split(',')[0].trim()
+
+  const genericResponse = {
+    status: 200,
+    body: {
+      success: true,
+      message:
+        'If this email belongs to a verified customer, a secure sign-in link will be sent shortly.',
+    },
+  }
+
+  if (
+    !checkRateLimit(`gallery_login_ip_${clientIp}`) ||
+    !checkRateLimit(`gallery_login_email_${email}`)
+  ) {
+    return genericResponse
+  }
+
+  try {
+    const pool = await getDbPool()
+
+    const userRes = await pool.query(
+      `SELECT id, name, email
+       FROM public.users
+       WHERE LOWER(email) = LOWER($1)
+         AND email_verified_at IS NOT NULL
+         AND is_active = TRUE
+         AND role = 'customer'
+       LIMIT 1`,
+      [email]
+    )
+
+    if (userRes.rows.length === 0) {
+      return genericResponse
+    }
+
+    const user = userRes.rows[0]
+    const { rawToken, tokenHash } = generateVerificationToken()
+
+    const expiresAt = new Date(
+      Date.now() + GALLERY_LOGIN_LINK_MINUTES * 60 * 1000
+    )
+
+    const client = await pool.connect()
+
+    try {
+      await client.query('BEGIN')
+
+      await client.query(
+        `UPDATE public.gallery_login_tokens
+         SET used_at = NOW()
+         WHERE user_id = $1
+           AND used_at IS NULL`,
+        [user.id]
+      )
+
+      await client.query(
+        `INSERT INTO public.gallery_login_tokens
+           (user_id, token_hash, expires_at, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [user.id, tokenHash, expiresAt]
+      )
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
+    }
+
+    const verifyUrl = new URL(
+      '/register.html',
+      GALLERY_LOGIN_BASE_URL
+    )
+
+    verifyUrl.searchParams.set('gallery_login', rawToken)
+
+    const emailHtml = `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px;color:#241713">
+        <h1 style="color:#a32722;text-align:center">ZEN CAFÉ</h1>
+        <h2>Welcome back!</h2>
+        <p>Hello ${escapeGalleryEmailHtml(user.name)},</p>
+        <p>Click the button below to securely access the Zen Café Community Gallery.</p>
+        <p style="text-align:center;margin:32px 0">
+          <a href="${verifyUrl.toString()}"
+             style="background:#a32722;color:white;padding:14px 28px;border-radius:30px;text-decoration:none;font-weight:bold">
+            Access Community Gallery
+          </a>
+        </p>
+        <p>This link expires in 15 minutes and can only be used once.</p>
+        <p>If you did not request this email, you can safely ignore it.</p>
+      </div>
+    `
+
+    const creds = checkNotificationCredentials()
+
+    if (!creds.email.configured) {
+      console.error('Gallery sign-in email provider is not configured.')
+      return genericResponse
+    }
+
+    const emailRes = await fetch(RESEND_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: creds.email.from,
+        to: [user.email],
+        subject: 'Your Zen Café Community Gallery Sign-In Link',
+        html: emailHtml,
+      }),
+    })
+
+    if (!emailRes.ok) {
+      console.error(
+        'Gallery sign-in email delivery failed:',
+        emailRes.status
+      )
+    }
+
+    return genericResponse
+  } catch (err) {
+    console.error('Gallery login request failed:', err)
+    return genericResponse
+  }
+}
+
+/**
+ * Escape user-provided values before inserting into email HTML.
+ */
+function escapeGalleryEmailHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Verify a single-use gallery sign-in link.
+ * POST /api/auth/gallery-login/verify
+ */
+export async function handleGalleryLoginVerify(req, res, body) {
+  const rawToken = String(body?.token || '').trim()
+
+  if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: 'Invalid gallery sign-in link.',
+      },
+    }
+  }
+
+  const pool = await getDbPool()
+  const client = await pool.connect()
+
+  try {
+    await client.query('BEGIN')
+
+    const tokenRes = await client.query(
+      `SELECT t.id, t.user_id,
+              u.name, u.email, u.phone
+       FROM public.gallery_login_tokens t
+       JOIN public.users u ON u.id = t.user_id
+       WHERE t.token_hash = $1
+         AND t.used_at IS NULL
+         AND t.expires_at > NOW()
+         AND u.is_active = TRUE
+         AND u.email_verified_at IS NOT NULL
+         AND u.role = 'customer'
+       FOR UPDATE OF t`,
+      [hashToken(rawToken)]
+    )
+
+    if (tokenRes.rows.length === 0) {
+      await client.query('ROLLBACK')
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: 'This sign-in link is invalid, expired, or already used.',
+        },
+      }
+    }
+
+    const user = tokenRes.rows[0]
+
+    await client.query(
+      `UPDATE public.gallery_login_tokens
+       SET used_at = NOW()
+       WHERE id = $1`,
+      [user.id === undefined ? null : tokenRes.rows[0].id]
+    )
+
+    const customerToken =
+      'zen_cust_' + crypto.randomBytes(32).toString('hex')
+
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    )
+
+    await client.query(
+      `INSERT INTO public.gallery_sessions
+         (user_id, token_hash, expires_at, created_at)
+       VALUES ($1, $2, $3, NOW())`,
+      [user.user_id, hashToken(customerToken), expiresAt]
+    )
+
+    await client.query('COMMIT')
+
+    return {
+      status: 200,
+      body: {
+        success: true,
+        message: 'Gallery access activated successfully.',
+        token: customerToken,
+        expiresAt: expiresAt.toISOString(),
+        customer: {
+          id: String(user.user_id),
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+        },
+      },
+    }
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Gallery login verification failed:', err)
+
+    return {
+      status: 500,
+      body: {
+        success: false,
+        error: 'Unable to activate gallery access.',
+      },
+    }
+  } finally {
+    client.release()
+  }
+}
+

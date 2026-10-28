@@ -32,6 +32,8 @@ import {
   handleCustomerMe,
   handleCustomerLogout,
   handleGalleryCheckEmail,
+  handleGalleryLoginRequest,
+  handleGalleryLoginVerify,
 } from './auth.mjs'
 
 import { isDbInMemory, getDbPool } from '../db.mjs'
@@ -196,6 +198,43 @@ export async function handleApiRequest(req, res) {
     const result = await handleCustomerLogout(req, res)
     sendJson(res, result.status, result.body)
     return true
+  }
+    // ==========================================
+  // Secure Community Gallery Email Sign-In
+  // ==========================================
+
+  // POST /api/auth/gallery-login/request
+  if (pathname === '/api/auth/gallery-login/request' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody(req)
+      const result = await handleGalleryLoginRequest(req, res, body)
+      sendJson(res, result.status, result.body)
+      return true
+    } catch (err) {
+      console.error('Gallery login request error:', err)
+      sendJson(res, 400, {
+        success: false,
+        error: 'Invalid request.',
+      })
+      return true
+    }
+  }
+
+  // POST /api/auth/gallery-login/verify
+  if (pathname === '/api/auth/gallery-login/verify' && req.method === 'POST') {
+    try {
+      const body = await parseJsonBody(req)
+      const result = await handleGalleryLoginVerify(req, res, body)
+      sendJson(res, result.status, result.body)
+      return true
+    } catch (err) {
+      console.error('Gallery login verification error:', err)
+      sendJson(res, 400, {
+        success: false,
+        error: 'Invalid sign-in request.',
+      })
+      return true
+    }
   }
 
   // POST /api/gallery/check-email (Gallery readiness)

@@ -344,10 +344,10 @@ export async function handleGalleryRoute(req, res, parsedUrl) {
         })
 
         const insertRes = await client.query(
-          `INSERT INTO public.gallery (
-             uploaded_by, title, description, image_key, image_url, status, created_at
-           ) VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
-           RETURNING id, title, description, image_key, image_url, status, created_at`,
+         `INSERT INTO public.gallery (
+   uploaded_by, title, description, image_key, image_url, status, created_at
+ ) VALUES ($1, $2, $3, $4, $5, 'approved', NOW())
+ RETURNING id, title, description, image_key, image_url, status, created_at`,
           [
             user.id,
             name || user.name,
@@ -374,10 +374,10 @@ export async function handleGalleryRoute(req, res, parsedUrl) {
         res,
         {
           success: true,
-          message: 'Photos uploaded successfully! They will appear in the community gallery once approved by admin.',
+        message: 'Photos uploaded successfully! Your photos are now visible in the community gallery.',
           count: createdPhotos.length,
           uploadedCount: createdPhotos.length,
-          status: 'pending',
+          status: 'approved',
           nextUploadAt: nextEligibleAt.toISOString(),
           photos: createdPhotos.map(p => ({
             id: String(p.id),

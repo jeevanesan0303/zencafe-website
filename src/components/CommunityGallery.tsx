@@ -1,7 +1,7 @@
 
 import {
-  ChangeEvent,
-  FormEvent,
+  type ChangeEvent,
+  type FormEvent,
   useEffect,
   useMemo,
   useRef,
@@ -22,15 +22,13 @@ import {
   UploadCloud,
   X,
 } from 'lucide-react'
-import { GALLERY_SEED } from '../data/menu'
 
 type Post = {
   id: string
   user: string
   caption: string
   image: string
-  local?: boolean
-  likes?: number
+  likes: number
   createdAt?: number
 }
 
@@ -43,11 +41,13 @@ type AccessResponse = {
   maxUploads?: number
   nextUploadAt?: string | null
   message?: string
+  error?: string
 }
 
 type UploadResponse = {
   success: boolean
   message?: string
+  error?: string
   uploadedCount?: number
   nextUploadAt?: string | null
 }
@@ -73,27 +73,11 @@ type PublicPhoto = {
   likes?: number
 }
 
-const API = '/api/gallery'
-const MAX_PHOTOS = 2
-const MAX_FILE_SIZE = 5 * 1024 * 1024
-const AUTO_SLIDE_MS = 3800
-const LIKES_KEY = 'zen-cafe-gallery-likes-v124'
-
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase()
-}
-
-function emailLooksValid(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value))
-}
-
-function formatRemaining(ms: number) {
-  const total = Math.max(0, Math.ceil(ms / 1000))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+type PublicResponse = {
+  success: boolean
+  photos?: PublicPhoto[]
+  message?: string
+  error?: string
 }
 
 type LikeRecord = {
@@ -101,19 +85,67 @@ type LikeRecord = {
   liked: boolean
 }
 
+const API = '/api/gallery'
+const MAX_PHOTOS = 2
+const MAX_FILE_SIZE = 5 * 1024 * 1024
+const AUTO_SLIDE_MS = 3800
+
+const LIKES_KEY = 'zen-cafe-gallery-likes-v124'
+const CUSTOMER_PROFILE_KEY = 'zen-cafe-customer-registration-v149'
+const CUSTOMER_SESSION_KEY = 'zen-cafe-customer-session-token-v1'
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function emailLooksValid(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    normalizeEmail(value),
+  )
+}
+
+function formatRemaining(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+
+  return [
+    hours,
+    minutes,
+    seconds,
+  ]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+}
+
 function readLikeMap(): Record<string, LikeRecord> {
   try {
-    return JSON.parse(localStorage.getItem(LIKES_KEY) || '{}')
+    const raw = localStorage.getItem(LIKES_KEY)
+
+    if (!raw) return {}
+
+    const parsed: unknown = JSON.parse(raw)
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      return {}
+    }
+
+    return parsed as Record<string, LikeRecord>
   } catch {
     return {}
   }
 }
 
-function saveLikeMap(map: Record<string, LikeRecord>) {
+function saveLikeMap(map: Record<string, LikeRecord>): void {
   try {
     localStorage.setItem(LIKES_KEY, JSON.stringify(map))
   } catch {
-    // Likes are optional local UI preferences.
+    // Local likes are optional.
   }
 }
 
@@ -121,10 +153,69 @@ async function readApiResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type') || ''
 
   if (!contentType.includes('application/json')) {
-    throw new Error('The gallery API is unavailable. Please try again.')
+    throw new Error(
+      'The gallery service is unavailable. Please try again later.',
+    )
   }
 
   return response.json() as Promise<T>
+}
+
+function getErrorMessage(
+  data: {
+    message?: string
+    error?: string
+  },
+  fallback: string,
+): string {
+  return data.message || data.error || fallback
+}
+
+function normalizePublicPhotos(photos: PublicPhoto[]): Post[] {
+  const likes = readLikeMap()
+
+  return photos
+    .filter(photo => {
+      return Boolean(
+        photo.imageUrl ||
+        photo.image_url ||
+        photo.image,
+      )
+    })
+    .map(photo => {
+      const id = String(photo.id)
+
+      const timestamp = photo.createdAt
+        ? Number(photo.createdAt)
+        : photo.created_at
+          ? new Date(photo.created_at).getTime()
+          : undefined
+
+      return {
+        id,
+        user:
+          photo.user ||
+          photo.name ||
+          photo.title ||
+          'Zen Guest',
+        caption:
+          photo.caption ||
+          photo.description ||
+          '',
+        image:
+          photo.imageUrl ||
+          photo.image_url ||
+          photo.image ||
+          '',
+        likes:
+          likes[id]?.count ??
+          Number(photo.likes ?? 0),
+        createdAt:
+          timestamp && Number.isFinite(timestamp)
+            ? timestamp
+            : undefined,
+      }
+    })
 }
 
 export default function CommunityGallery({
@@ -132,16 +223,11 @@ export default function CommunityGallery({
 }: {
   toast: (message: string) => void
 }) {
-  const seed = useMemo<Post[]>(() => {
-    const savedLikes = readLikeMap()
-
-    return GALLERY_SEED.map((post, index) => ({
-      ...post,
-      likes: savedLikes[post.id]?.count ?? (126 + index * 9),
-    }))
-  }, [])
-
-  const [posts, setPosts] = useState<Post[]>(seed)
+  // Only approved API photos are displayed.
+  // No seed images or mock gallery records.
+  const [posts, setPosts] = useState<Post[]>([])
+  const [galleryLoading, setGalleryLoading] = useState(true)
+  const [galleryError, setGalleryError] = useState('')
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -155,8 +241,13 @@ export default function CommunityGallery({
 
   const [verifiedEmail, setVerifiedEmail] = useState('')
   const [registered, setRegistered] = useState(false)
+  const [eligible, setEligible] = useState(false)
+
   const [maxUploads, setMaxUploads] = useState(MAX_PHOTOS)
-  const [nextUploadAt, setNextUploadAt] = useState<string | null>(null)
+  const [nextUploadAt, setNextUploadAt] = useState<string | null>(
+    null,
+  )
+
   const [now, setNow] = useState(Date.now())
 
   const [lightbox, setLightbox] = useState<Post | null>(null)
@@ -165,15 +256,19 @@ export default function CommunityGallery({
   const [active, setActive] = useState(0)
   const [paused, setPaused] = useState(false)
 
-  const [photoShapes, setPhotoShapes] = useState<Record<string, PhotoShape>>({})
+  const [photoShapes, setPhotoShapes] = useState<
+    Record<string, PhotoShape>
+  >({})
 
-  const [likedIds, setLikedIds] = useState<Record<string, boolean>>(() => {
+  const [likedIds, setLikedIds] = useState<
+    Record<string, boolean>
+  >(() => {
     const map = readLikeMap()
 
     return Object.fromEntries(
       Object.entries(map)
         .filter(([, value]) => value.liked)
-        .map(([id]) => [id, true])
+        .map(([id]) => [id, true]),
     )
   })
 
@@ -187,7 +282,10 @@ export default function CommunityGallery({
   const normalizedEmail = normalizeEmail(email)
 
   const cooldownRemaining = nextUploadAt
-    ? Math.max(0, new Date(nextUploadAt).getTime() - now)
+    ? Math.max(
+        0,
+        new Date(nextUploadAt).getTime() - now,
+      )
     : 0
 
   const cooldownActive = cooldownRemaining > 0
@@ -199,17 +297,40 @@ export default function CommunityGallery({
 
   const canUpload =
     emailConfirmed &&
+    eligible &&
     !cooldownActive &&
     !busy &&
     !checking &&
     maxUploads > 0
 
-  const guestUploads = useMemo(
-    () => posts.filter(post => post.local).length,
-    [posts]
-  )
+  const guestUploads = posts.length
 
-  // Keep object URLs synchronized for cleanup.
+  const lightboxShape = lightbox
+    ? photoShapes[lightbox.id] || 'landscape'
+    : 'landscape'
+
+  const galleryStatus = useMemo(() => {
+    if (galleryLoading) {
+      return 'Loading guest moments...'
+    }
+
+    if (galleryError) {
+      return 'Gallery temporarily unavailable'
+    }
+
+    if (guestUploads === 0) {
+      return 'No guest photos yet'
+    }
+
+    return `${guestUploads} guest ${
+      guestUploads === 1 ? 'photo' : 'photos'
+    }`
+  }, [
+    galleryLoading,
+    galleryError,
+    guestUploads,
+  ])
+
   useEffect(() => {
     photosRef.current = photos
   }, [photos])
@@ -230,105 +351,127 @@ export default function CommunityGallery({
     return () => window.clearInterval(timer)
   }, [])
 
-  // Pre-load saved customer profile if user previously registered
+  // Pre-fill the customer's details without granting upload access.
   useEffect(() => {
     try {
-      const savedProfile = localStorage.getItem('zen-cafe-customer-registration-v149')
-      if (savedProfile) {
-        const parsed = JSON.parse(savedProfile)
-        if (parsed.email && !email) {
-          setEmail(parsed.email)
-        }
-        if (parsed.name && !name) {
-          setName(parsed.name)
-        }
+      const raw = localStorage.getItem(CUSTOMER_PROFILE_KEY)
+
+      if (!raw) return
+
+      const profile = JSON.parse(raw) as {
+        email?: string
+        name?: string
+      }
+
+      if (profile.email) {
+        setEmail(profile.email)
+      }
+
+      if (profile.name) {
+        setName(profile.name)
       }
     } catch {
-      // ignore
+      // The form remains usable without a saved profile.
     }
   }, [])
 
-  // Retrieve approved public photos when the public API is available.
-  // The existing seed carousel remains visible until that endpoint
-  // is implemented.
-  useEffect(() => {
-    let cancelled = false
+  async function loadApprovedPhotos(
+    signal?: AbortSignal,
+  ): Promise<void> {
+    setGalleryLoading(true)
+    setGalleryError('')
 
-    async function loadApprovedPhotos() {
-      try {
-        const response = await fetch(`${API}/public`, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        })
+    try {
+      const response = await fetch(`${API}/public`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        cache: 'no-store',
+        signal,
+      })
 
-        if (!response.ok) return
+      const data = await readApiResponse<PublicResponse>(
+        response,
+      )
 
-        const result = await readApiResponse<{
-          success: boolean
-          photos?: PublicPhoto[]
-        }>(response)
+      if (!response.ok || !data.success) {
+        throw new Error(
+          getErrorMessage(
+            data,
+            'Unable to load gallery photos.',
+          ),
+        )
+      }
 
-        if (!result.success || !Array.isArray(result.photos)) return
+      if (!Array.isArray(data.photos)) {
+        throw new Error('Invalid gallery response.')
+      }
 
-        const approved: Post[] = result.photos
-          .filter(photo =>
-            Boolean(photo.imageUrl || photo.image_url || photo.image)
-          )
-          .map(photo => ({
-            id: String(photo.id),
-            user: photo.user || photo.name || photo.title || 'Zen Guest',
-            caption: photo.caption || photo.description || '',
-            image: photo.imageUrl || photo.image_url || photo.image || '',
-            local: true,
-            likes: photo.likes ?? 0,
-            createdAt: photo.createdAt ||
-              (photo.created_at
-                ? new Date(photo.created_at).getTime()
-                : Date.now()),
-          }))
+      if (signal?.aborted) return
 
-        if (cancelled) return
+      setPosts(normalizePublicPhotos(data.photos))
+      setActive(0)
+    } catch (error) {
+      if (signal?.aborted) return
 
-        const likes = readLikeMap()
-
-        setPosts([
-          ...approved.map(post => ({
-            ...post,
-            likes: likes[post.id]?.count ?? post.likes,
-          })),
-          ...seed,
-        ])
-      } catch {
-        // The public gallery endpoint will be added separately.
+      setPosts([])
+      setGalleryError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to load gallery photos.',
+      )
+    } finally {
+      if (!signal?.aborted) {
+        setGalleryLoading(false)
       }
     }
-
-    void loadApprovedPhotos()
-
-    return () => {
-      cancelled = true
-    }
-  }, [seed])
+  }
 
   useEffect(() => {
-    if (posts.length <= 1 || paused || lightbox) return
+    const controller = new AbortController()
+
+    void loadApprovedPhotos(controller.signal)
+
+    return () => {
+      controller.abort()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      posts.length <= 1 ||
+      paused ||
+      lightbox
+    ) {
+      return
+    }
 
     const timer = window.setInterval(() => {
-      setActive(current => (current + 1) % posts.length)
+      setActive(current => {
+        return (current + 1) % posts.length
+      })
     }, AUTO_SLIDE_MS)
 
     return () => window.clearInterval(timer)
-  }, [posts.length, paused, lightbox])
+  }, [
+    posts.length,
+    paused,
+    lightbox,
+  ])
 
   useEffect(() => {
-    if (active >= posts.length && posts.length) {
+    if (active >= posts.length) {
       setActive(0)
     }
-  }, [active, posts.length])
+  }, [
+    active,
+    posts.length,
+  ])
 
   useEffect(() => {
     return () => {
-      if (resumeTimer.current) {
+      if (resumeTimer.current !== null) {
         window.clearTimeout(resumeTimer.current)
       }
     }
@@ -337,14 +480,15 @@ export default function CommunityGallery({
   useEffect(() => {
     if (!lightbox) return
 
-    const previous = document.body.style.overflow
+    const previousOverflow = document.body.style.overflow
 
     document.body.style.overflow = 'hidden'
     document.body.classList.add('zen-gallery-lightbox-open')
 
-    const onKey = (event: KeyboardEvent) => {
+    function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setLightboxClosing(true)
+
         window.setTimeout(() => {
           setLightbox(null)
           setLightboxClosing(false)
@@ -355,13 +499,15 @@ export default function CommunityGallery({
     window.addEventListener('keydown', onKey)
 
     return () => {
-      document.body.style.overflow = previous
-      document.body.classList.remove('zen-gallery-lightbox-open')
+      document.body.style.overflow = previousOverflow
+      document.body.classList.remove(
+        'zen-gallery-lightbox-open',
+      )
       window.removeEventListener('keydown', onKey)
     }
   }, [lightbox])
 
-  function clearPhotos() {
+  function clearPhotos(): void {
     photosRef.current.forEach(photo => {
       URL.revokeObjectURL(photo.preview)
     })
@@ -374,33 +520,38 @@ export default function CommunityGallery({
     }
   }
 
-  function handleEmailChange(value: string) {
-    const normalized = normalizeEmail(value)
-
-    setEmail(value)
+  function resetAccess(): void {
+    setRegistered(false)
+    setEligible(false)
+    setVerifiedEmail('')
+    setNextUploadAt(null)
+    setMaxUploads(MAX_PHOTOS)
     setUploaded(false)
+    clearPhotos()
+  }
 
-    if (normalized !== verifiedEmail) {
-      setRegistered(false)
-      setVerifiedEmail('')
-      setNextUploadAt(null)
-      setMaxUploads(MAX_PHOTOS)
-      clearPhotos()
+  function handleEmailChange(value: string): void {
+    setEmail(value)
+
+    if (normalizeEmail(value) !== verifiedEmail) {
+      resetAccess()
     }
   }
 
-  // ==========================================
-  // CHECK REGISTERED EMAIL IN POSTGRESQL
-  // ==========================================
-
-  async function checkEmail() {
+  // Check the verified email against the server.
+  // The server remains responsible for upload authorization.
+  async function checkEmail(): Promise<void> {
     if (!emailLooksValid(email)) {
       toast('Please enter a valid email address.')
+      emailRef.current?.focus()
       return
     }
 
+    const checkedEmail = normalizeEmail(email)
+
     setChecking(true)
     setRegistered(false)
+    setEligible(false)
     setVerifiedEmail('')
     setUploaded(false)
 
@@ -412,53 +563,79 @@ export default function CommunityGallery({
           Accept: 'application/json',
         },
         body: JSON.stringify({
-          email: normalizedEmail,
+          email: checkedEmail,
         }),
       })
 
-      const data = await readApiResponse<AccessResponse>(response)
+      const data = await readApiResponse<AccessResponse>(
+        response,
+      )
 
       if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Unable to check email.')
+        throw new Error(
+          getErrorMessage(
+            data,
+            'Unable to check your email.',
+          ),
+        )
       }
 
       if (!data.registered) {
-        setRegistered(false)
-        setNextUploadAt(null)
-        clearPhotos()
-        toast('Email not found. Please register and verify your email first.')
+        resetAccess()
+
+        toast(
+          'Email not found or not verified. Please register and verify your email first.',
+        )
         return
       }
 
       setRegistered(true)
-      setVerifiedEmail(normalizedEmail)
-      setMaxUploads(Math.max(0, Math.min(MAX_PHOTOS, data.maxUploads ?? 2)))
+      setVerifiedEmail(checkedEmail)
+
+      setMaxUploads(
+        Math.max(
+          0,
+          Math.min(
+            MAX_PHOTOS,
+            data.maxUploads ?? MAX_PHOTOS,
+          ),
+        ),
+      )
+
       setNextUploadAt(data.nextUploadAt || null)
+      setNow(Date.now())
+
+      setEligible(Boolean(data.canUpload))
 
       if (data.canUpload) {
-        toast('Registered email found. You can upload photos now.')
+        toast(
+          'Your registered email is eligible for photo uploads.',
+        )
       } else {
-        toast(data.message || 'Your upload cooldown is active.')
+        toast(
+          data.message ||
+            'Photo uploads are not available for this email yet.',
+        )
       }
     } catch (error) {
-      setRegistered(false)
-      setVerifiedEmail('')
+      resetAccess()
+
       toast(
         error instanceof Error
           ? error.message
-          : 'Unable to verify your registered email.'
+          : 'Unable to check your registered email.',
       )
     } finally {
       setChecking(false)
     }
   }
 
-  // ==========================================
-  // SELECT 1 OR 2 PHOTOS
-  // ==========================================
-
-  function handlePhotoSelection(event: ChangeEvent<HTMLInputElement>) {
-    const selected = Array.from(event.target.files || [])
+  function handlePhotoSelection(
+    event: ChangeEvent<HTMLInputElement>,
+  ): void {
+    const selected = Array.from(
+      event.target.files || [],
+    )
 
     if (!canUpload) {
       toast('Please check your registered email first.')
@@ -466,25 +643,35 @@ export default function CommunityGallery({
       return
     }
 
-    if (!selected.length) return
+    if (selected.length === 0) return
 
     if (selected.length > maxUploads) {
-      toast(`Please select a maximum of ${maxUploads} photos.`)
+      toast(
+        `Please select a maximum of ${maxUploads} photos.`,
+      )
       event.target.value = ''
       return
     }
 
-    const allowed = ['image/jpeg', 'image/png', 'image/webp']
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ]
 
     for (const file of selected) {
-      if (!allowed.includes(file.type)) {
-        toast('Only JPEG, PNG and WebP photos are supported.')
+      if (!allowedTypes.includes(file.type)) {
+        toast(
+          'Only JPEG, PNG and WebP photos are supported.',
+        )
         event.target.value = ''
         return
       }
 
       if (file.size > MAX_FILE_SIZE) {
-        toast('Each photo must be smaller than 5 MB.')
+        toast(
+          'Each photo must be 5 MB or smaller.',
+        )
         event.target.value = ''
         return
       }
@@ -498,35 +685,41 @@ export default function CommunityGallery({
 
     clearPhotos()
 
-    const prepared = selected.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      preview: URL.createObjectURL(file),
-    }))
+    const prepared: SelectedPhoto[] = selected.map(
+      file => ({
+        id: crypto.randomUUID(),
+        file,
+        preview: URL.createObjectURL(file),
+      }),
+    )
 
     photosRef.current = prepared
     setPhotos(prepared)
     setUploaded(false)
 
     toast(
-      `${prepared.length} photo${prepared.length > 1 ? 's' : ''} ready to upload.`
+      `${prepared.length} ${
+        prepared.length === 1 ? 'photo is' : 'photos are'
+      } ready to upload.`,
     )
   }
 
-  // ==========================================
-  // UPLOAD TO CLOUDFLARE R2
-  // ==========================================
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault()
 
-    if (!emailConfirmed) {
+    if (!emailConfirmed || !eligible) {
       toast('Check your registered email first.')
       return
     }
 
     if (cooldownActive) {
-      toast(`You can upload again in ${formatRemaining(cooldownRemaining)}.`)
+      toast(
+        `You can upload again in ${formatRemaining(
+          cooldownRemaining,
+        )}.`,
+      )
       return
     }
 
@@ -540,8 +733,13 @@ export default function CommunityGallery({
       return
     }
 
-    if (photos.length < 1 || photos.length > maxUploads) {
-      toast(`Please select 1 to ${maxUploads} photos.`)
+    if (
+      photos.length < 1 ||
+      photos.length > maxUploads
+    ) {
+      toast(
+        `Please select 1 to ${maxUploads} photos.`,
+      )
       return
     }
 
@@ -552,17 +750,27 @@ export default function CommunityGallery({
     form.append('caption', caption.trim())
 
     photos.forEach(photo => {
-      form.append('photos', photo.file, photo.file.name)
+      form.append(
+        'photos',
+        photo.file,
+        photo.file.name,
+      )
     })
+
+    const token = localStorage.getItem(
+      CUSTOMER_SESSION_KEY,
+    )
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    }
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
 
     setBusy(true)
     setUploaded(false)
-
-    const token = localStorage.getItem('zen-cafe-customer-session-token-v1')
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
 
     try {
       const response = await fetch(`${API}/upload`, {
@@ -571,53 +779,53 @@ export default function CommunityGallery({
         body: form,
       })
 
-      const data = await readApiResponse<UploadResponse>(response)
+      const data = await readApiResponse<UploadResponse>(
+        response,
+      )
 
       if (!response.ok || !data.success) {
         if (data.nextUploadAt) {
           setNextUploadAt(data.nextUploadAt)
+          setNow(Date.now())
         }
 
-        throw new Error(data.message || 'Photo upload failed.')
+        throw new Error(
+          getErrorMessage(
+            data,
+            'Photo upload failed.',
+          ),
+        )
       }
 
       setNextUploadAt(data.nextUploadAt || null)
       setNow(Date.now())
+      setEligible(false)
 
-      setName('')
       setCaption('')
       clearPhotos()
 
       setUploaded(true)
 
       toast(
-        'Photos uploaded successfully. They will appear after admin approval.'
+        'Photos uploaded successfully. They will appear after approval.',
       )
-
-      window.setTimeout(() => {
-        setUploaded(false)
-      }, 5000)
     } catch (error) {
       toast(
         error instanceof Error
           ? error.message
-          : 'Unable to upload photos. Please try again.'
+          : 'Unable to upload photos. Please try again.',
       )
     } finally {
       setBusy(false)
     }
   }
 
-  // ==========================================
-  // CAROUSEL
-  // ==========================================
-
-  function openLightbox(post: Post) {
+  function openLightbox(post: Post): void {
     setLightboxClosing(false)
     setLightbox(post)
   }
 
-  function closeLightbox() {
+  function closeLightbox(): void {
     if (!lightbox || lightboxClosing) return
 
     setLightboxClosing(true)
@@ -628,21 +836,30 @@ export default function CommunityGallery({
     }, 280)
   }
 
-  function nav(direction: 1 | -1) {
-    if (posts.length <= 1 || navLock.current) return
+  function nav(direction: 1 | -1): void {
+    if (
+      posts.length <= 1 ||
+      navLock.current
+    ) {
+      return
+    }
 
     navLock.current = true
     setPaused(true)
 
-    setActive(current =>
-      (current + direction + posts.length) % posts.length
-    )
+    setActive(current => {
+      return (
+        current +
+        direction +
+        posts.length
+      ) % posts.length
+    })
 
     window.setTimeout(() => {
       navLock.current = false
     }, 760)
 
-    if (resumeTimer.current) {
+    if (resumeTimer.current !== null) {
       window.clearTimeout(resumeTimer.current)
     }
 
@@ -651,8 +868,13 @@ export default function CommunityGallery({
     }, 1500)
   }
 
-  function goTo(index: number) {
-    if (index === active || navLock.current) return
+  function goTo(index: number): void {
+    if (
+      index === active ||
+      navLock.current
+    ) {
+      return
+    }
 
     navLock.current = true
     setPaused(true)
@@ -662,7 +884,7 @@ export default function CommunityGallery({
       navLock.current = false
     }, 760)
 
-    if (resumeTimer.current) {
+    if (resumeTimer.current !== null) {
       window.clearTimeout(resumeTimer.current)
     }
 
@@ -671,23 +893,29 @@ export default function CommunityGallery({
     }, 1500)
   }
 
-  function like(id: string) {
-    const current = posts.find(post => post.id === id)
+  function like(id: string): void {
+    const current = posts.find(
+      post => post.id === id,
+    )
+
     if (!current) return
 
     const wasLiked = Boolean(likedIds[id])
 
     const nextCount = Math.max(
       0,
-      (current.likes || 0) + (wasLiked ? -1 : 1)
+      current.likes + (wasLiked ? -1 : 1),
     )
 
     setPosts(previous =>
       previous.map(post =>
         post.id === id
-          ? { ...post, likes: nextCount }
-          : post
-      )
+          ? {
+              ...post,
+              likes: nextCount,
+            }
+          : post,
+      ),
     )
 
     setLikedIds(previous => ({
@@ -705,12 +933,16 @@ export default function CommunityGallery({
     saveLikeMap(map)
   }
 
-  function role(index: number) {
+  function role(index: number): string {
     const count = posts.length
 
     if (!count) return 'back'
 
-    const diff = (index - active + count) % count
+    const diff = (
+      index -
+      active +
+      count
+    ) % count
 
     if (diff === 0) return 'center'
     if (diff === 1) return 'right'
@@ -719,7 +951,11 @@ export default function CommunityGallery({
     return 'back'
   }
 
-  function detectShape(id: string, width: number, height: number) {
+  function detectShape(
+    id: string,
+    width: number,
+    height: number,
+  ): void {
     if (!width || !height) return
 
     const ratio = width / height
@@ -736,13 +972,12 @@ export default function CommunityGallery({
     setPhotoShapes(previous =>
       previous[id] === shape
         ? previous
-        : { ...previous, [id]: shape }
+        : {
+            ...previous,
+            [id]: shape,
+          },
     )
   }
-
-  const lightboxShape = lightbox
-    ? photoShapes[lightbox.id] || 'landscape'
-    : 'landscape'
 
   return (
     <section
@@ -753,7 +988,10 @@ export default function CommunityGallery({
       <div className="gallery-section-inner mx-auto max-w-[1500px] px-5 py-24 sm:px-10 lg:px-12">
         <div className="gallery-section-head mb-10 grid gap-6 lg:grid-cols-[1fr_.7fr] lg:items-end">
           <div>
-            <p className="kicker">Guest Moments</p>
+            <p className="kicker">
+              Guest Moments
+            </p>
+
             <h2 className="section-title">
               Your Zen moments.
               <br />
@@ -762,9 +1000,9 @@ export default function CommunityGallery({
           </div>
 
           <p className="section-copy lg:justify-self-end">
-            Registered guests can share up to 2 photos immediately.
-            After uploading, a 24-hour cooldown applies.
-            Photos appear after approval.
+            Registered and verified guests can share up to
+            two photos. A 24-hour cooldown begins after
+            a successful upload. Photos appear after approval.
           </p>
         </div>
 
@@ -779,7 +1017,10 @@ export default function CommunityGallery({
               </div>
 
               <div>
-                <p className="kicker">Share a Memory</p>
+                <p className="kicker">
+                  Share a Memory
+                </p>
+
                 <h3 className="font-serif text-[32px]">
                   Add your Zen moment
                 </h3>
@@ -813,7 +1054,9 @@ export default function CommunityGallery({
 
               <button
                 type="button"
-                onClick={checkEmail}
+                onClick={() => {
+                  void checkEmail()
+                }}
                 disabled={checking || busy}
                 className="secondary-pill mt-3 !px-4 !py-3 disabled:opacity-50"
               >
@@ -829,7 +1072,9 @@ export default function CommunityGallery({
               <div
                 className={`gallery-access-state mt-4 ${
                   canUpload ? 'is-ready' : ''
-                } ${cooldownActive ? 'is-limit' : ''}`}
+                } ${
+                  cooldownActive ? 'is-limit' : ''
+                }`}
               >
                 <div className="gallery-access-icon">
                   {cooldownActive ? (
@@ -854,10 +1099,14 @@ export default function CommunityGallery({
 
                   <p className="mt-1 text-[11px] leading-5 text-[#6c5c53]">
                     {cooldownActive
-                      ? `Upload again in ${formatRemaining(cooldownRemaining)}.`
+                      ? `Upload again in ${formatRemaining(
+                          cooldownRemaining,
+                        )}.`
                       : canUpload
-                        ? `Registered email found. You can upload up to ${maxUploads} photos now.`
-                        : 'Enter your registered and verified email to check upload eligibility.'}
+                        ? `Your email is eligible. You can upload up to ${maxUploads} photos.`
+                        : emailConfirmed
+                          ? 'Photo uploads are not currently available for this email.'
+                          : 'Enter your registered and verified email to check upload eligibility.'}
                   </p>
                 </div>
 
@@ -873,7 +1122,9 @@ export default function CommunityGallery({
 
                 <input
                   value={name}
-                  onChange={event => setName(event.target.value)}
+                  onChange={event =>
+                    setName(event.target.value)
+                  }
                   className="field-input"
                   placeholder="Enter your name"
                   maxLength={40}
@@ -902,7 +1153,9 @@ export default function CommunityGallery({
 
               <textarea
                 value={caption}
-                onChange={event => setCaption(event.target.value)}
+                onChange={event =>
+                  setCaption(event.target.value)
+                }
                 disabled={!canUpload}
                 className="field-input min-h-[110px] resize-y disabled:cursor-not-allowed disabled:opacity-45"
                 maxLength={160}
@@ -915,7 +1168,9 @@ export default function CommunityGallery({
               {photos.length > 0 ? (
                 <div
                   className={`grid gap-2 p-3 ${
-                    photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1'
+                    photos.length > 1
+                      ? 'grid-cols-2'
+                      : 'grid-cols-1'
                   }`}
                 >
                   {photos.map(photo => (
@@ -934,14 +1189,18 @@ export default function CommunityGallery({
               ) : (
                 <div className="grid h-[250px] place-items-center text-center text-[#76675e]">
                   <div>
-                    <ImagePlus className="mx-auto mb-3" size={29} />
+                    <ImagePlus
+                      className="mx-auto mb-3"
+                      size={29}
+                    />
 
                     <p className="text-sm">
                       Your photo preview appears here.
                     </p>
 
                     <p className="mt-1 text-[10px]">
-                      Up to 2 photos · JPEG, PNG or WebP · 5 MB each
+                      Up to 2 photos · JPEG, PNG or WebP ·
+                      5 MB each
                     </p>
                   </div>
                 </div>
@@ -950,12 +1209,20 @@ export default function CommunityGallery({
 
             <button
               type="submit"
-              disabled={busy || !canUpload || photos.length === 0}
+              disabled={
+                busy ||
+                !canUpload ||
+                photos.length === 0
+              }
               className="gallery-upload-submit primary-pill mt-5 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {busy
                 ? 'Uploading...'
-                : `Upload ${photos.length || ''} photo${photos.length === 1 ? '' : 's'}`}
+                : `Upload ${
+                    photos.length || ''
+                  } photo${
+                    photos.length === 1 ? '' : 's'
+                  }`}
 
               <Camera size={16} />
             </button>
@@ -963,7 +1230,8 @@ export default function CommunityGallery({
             {uploaded && (
               <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#2f7d55]/15 bg-[#eaf6ef] px-4 py-3 text-[11px] font-semibold text-[#315b46]">
                 <CheckCircle2 size={17} />
-                Photos uploaded successfully. Waiting for admin approval.
+                Photos uploaded successfully.
+                Waiting for approval.
               </div>
             )}
           </form>
@@ -971,13 +1239,15 @@ export default function CommunityGallery({
           <div
             className="gallery-carousel-shell"
             onTouchStart={event => {
-              touch.current = event.changedTouches[0].clientX
+              touch.current =
+                event.changedTouches[0].clientX
             }}
             onTouchEnd={event => {
               if (touch.current === null) return
 
               const dx =
-                event.changedTouches[0].clientX - touch.current
+                event.changedTouches[0].clientX -
+                touch.current
 
               touch.current = null
 
@@ -988,7 +1258,10 @@ export default function CommunityGallery({
           >
             <div className="gallery-carousel-head">
               <div>
-                <p className="kicker">Guest Stories</p>
+                <p className="kicker">
+                  Guest Stories
+                </p>
+
                 <h3 className="font-serif text-[31px]">
                   Moments from our guests
                 </h3>
@@ -996,11 +1269,11 @@ export default function CommunityGallery({
 
               <div className="text-right">
                 <p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8b7469]">
-                  Auto slide
+                  Community Gallery
                 </p>
 
                 <p className="mt-1 text-[11px] text-[#6d5c53]">
-                  {seed.length} sample photos · {guestUploads} approved guest uploads
+                  {galleryStatus}
                 </p>
               </div>
             </div>
@@ -1008,18 +1281,68 @@ export default function CommunityGallery({
             <div className="gallery-carousel-stage">
               <div className="gallery-carousel-aura" />
 
+              {posts.length === 0 && (
+                <div className="relative z-10 flex min-h-[380px] items-center justify-center px-6 text-center">
+                  <div className="max-w-sm">
+                    <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-full bg-white/70 text-[#a32722] shadow-sm">
+                      {galleryLoading ? (
+                        <Clock3 size={28} />
+                      ) : (
+                        <ImagePlus size={28} />
+                      )}
+                    </div>
+
+                    <h4 className="font-serif text-2xl text-[#6d342c]">
+                      {galleryLoading
+                        ? 'Loading guest moments'
+                        : galleryError
+                          ? 'Unable to load photos'
+                          : 'Your moments belong here'}
+                    </h4>
+
+                    <p className="mt-3 text-sm leading-6 text-[#806f64]">
+                      {galleryLoading
+                        ? 'Please wait while we load the gallery.'
+                        : galleryError
+                          ? galleryError
+                          : 'No approved guest photos yet. Be among the first to share a Zen moment.'}
+                    </p>
+
+                    {galleryError && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void loadApprovedPhotos()
+                        }}
+                        className="secondary-pill mt-5 !px-5 !py-3"
+                      >
+                        Try again
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {posts.map((post, index) => {
-                const shape = photoShapes[post.id] || 'landscape'
+                const shape =
+                  photoShapes[post.id] ||
+                  'landscape'
 
                 return (
                   <article
                     key={post.id}
-                    className={`gallery-slide gallery-slide-${role(index)} gallery-shape-${shape}`}
-                    aria-hidden={role(index) !== 'center'}
+                    className={`gallery-slide gallery-slide-${role(
+                      index,
+                    )} gallery-shape-${shape}`}
+                    aria-hidden={
+                      role(index) !== 'center'
+                    }
                   >
                     <button
                       type="button"
-                      onClick={() => openLightbox(post)}
+                      onClick={() =>
+                        openLightbox(post)
+                      }
                       className="gallery-slide-media gallery-photo-trigger"
                     >
                       <img
@@ -1027,23 +1350,32 @@ export default function CommunityGallery({
                         alt=""
                         aria-hidden="true"
                         className="gallery-slide-backdrop"
-                        loading={role(index) === 'center' ? 'eager' : 'lazy'}
+                        loading={
+                          role(index) === 'center'
+                            ? 'eager'
+                            : 'lazy'
+                        }
                       />
 
                       <img
                         src={post.image}
                         alt={post.caption}
                         className="gallery-slide-photo"
-                        loading={role(index) === 'center' ? 'eager' : 'lazy'}
-                        onLoad={event =>
+                        loading={
+                          role(index) === 'center'
+                            ? 'eager'
+                            : 'lazy'
+                        }
+                        onLoad={event => {
                           detectShape(
                             post.id,
                             event.currentTarget.naturalWidth,
-                            event.currentTarget.naturalHeight
+                            event.currentTarget.naturalHeight,
                           )
-                        }
+                        }}
                         onError={event => {
-                          event.currentTarget.style.display = 'none'
+                          event.currentTarget.style.display =
+                            'none'
                         }}
                       />
 
@@ -1060,7 +1392,7 @@ export default function CommunityGallery({
                     <div className="gallery-slide-info">
                       <div>
                         <p className="gallery-slide-kicker">
-                          {post.local ? 'Guest upload' : 'Zen gallery'}
+                          Guest moment
                         </p>
 
                         <h4>{post.user}</h4>
@@ -1069,9 +1401,13 @@ export default function CommunityGallery({
 
                       <button
                         type="button"
-                        onClick={() => like(post.id)}
+                        onClick={() =>
+                          like(post.id)
+                        }
                         className={`zen-glass-mini gallery-like-button inline-flex items-center gap-1 rounded-full px-3 py-2 text-[10px] text-[#a32722] ${
-                          likedIds[post.id] ? 'is-liked' : ''
+                          likedIds[post.id]
+                            ? 'is-liked'
+                            : ''
                         }`}
                         aria-label={
                           likedIds[post.id]
@@ -1087,66 +1423,88 @@ export default function CommunityGallery({
                               : 'none'
                           }
                         />
-                        {post.likes || 0}
+
+                        {post.likes}
                       </button>
                     </div>
                   </article>
                 )
               })}
 
-              <div className="gallery-carousel-controls">
-                <button
-                  type="button"
-                  onClick={() => nav(-1)}
-                  className="round-control"
-                  aria-label="Previous photo"
-                >
-                  <ArrowLeft size={19} />
-                </button>
+              {posts.length > 1 && (
+                <div className="gallery-carousel-controls">
+                  <button
+                    type="button"
+                    onClick={() => nav(-1)}
+                    className="round-control"
+                    aria-label="Previous photo"
+                  >
+                    <ArrowLeft size={19} />
+                  </button>
 
-                <div className="gallery-carousel-dots">
-                  {posts.map((post, index) => (
-                    <button
-                      key={post.id}
-                      type="button"
-                      onClick={() => goTo(index)}
-                      className={index === active ? 'is-active' : ''}
-                      aria-label={`Go to photo ${index + 1}`}
-                    />
-                  ))}
+                  <div className="gallery-carousel-dots">
+                    {posts.map((post, index) => (
+                      <button
+                        key={post.id}
+                        type="button"
+                        onClick={() =>
+                          goTo(index)
+                        }
+                        className={
+                          index === active
+                            ? 'is-active'
+                            : ''
+                        }
+                        aria-label={`Go to photo ${
+                          index + 1
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => nav(1)}
+                    className="round-control"
+                    aria-label="Next photo"
+                  >
+                    <ArrowRight size={19} />
+                  </button>
                 </div>
+              )}
 
-                <button
-                  type="button"
-                  onClick={() => nav(1)}
-                  className="round-control"
-                  aria-label="Next photo"
+              {posts.length > 1 && (
+                <div
+                  className={`gallery-autoplay-indicator ${
+                    paused ? 'is-paused' : ''
+                  }`}
                 >
-                  <ArrowRight size={19} />
-                </button>
-              </div>
-
-              <div
-                className={`gallery-autoplay-indicator ${
-                  paused ? 'is-paused' : ''
-                }`}
-              >
-                <span />
-                <small>{paused ? 'Paused' : 'Auto loop'}</small>
-              </div>
+                  <span />
+                  <small>
+                    {paused
+                      ? 'Paused'
+                      : 'Auto loop'}
+                  </small>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="gallery-to-footer-fade" aria-hidden="true" />
+      <div
+        className="gallery-to-footer-fade"
+        aria-hidden="true"
+      />
 
       {lightbox &&
         createPortal(
           <div
             onClick={closeLightbox}
             className={`gallery-lightbox-backdrop gallery-lightbox-portal ${
-              lightboxClosing ? 'is-closing' : ''
+              lightboxClosing
+                ? 'is-closing'
+                : ''
             }`}
             role="dialog"
             aria-modal="true"
@@ -1155,9 +1513,13 @@ export default function CommunityGallery({
             <div className="gallery-lightbox-glow" />
 
             <div
-              onClick={event => event.stopPropagation()}
+              onClick={event =>
+                event.stopPropagation()
+              }
               className={`gallery-lightbox-panel gallery-lightbox-${lightboxShape} ${
-                lightboxClosing ? 'is-closing' : ''
+                lightboxClosing
+                  ? 'is-closing'
+                  : ''
               }`}
             >
               <button
@@ -1179,13 +1541,13 @@ export default function CommunityGallery({
                   src={lightbox.image}
                   alt={lightbox.caption}
                   className="gallery-lightbox-image"
-                  onLoad={event =>
+                  onLoad={event => {
                     detectShape(
                       lightbox.id,
                       event.currentTarget.naturalWidth,
-                      event.currentTarget.naturalHeight
+                      event.currentTarget.naturalHeight,
                     )
-                  }
+                  }}
                 />
 
                 <div className="gallery-lightbox-sheen" />
@@ -1194,7 +1556,7 @@ export default function CommunityGallery({
               <div className="gallery-lightbox-info">
                 <div>
                   <p className="gallery-lightbox-kicker">
-                    {lightbox.local ? 'Guest moment' : 'Zen moments'}
+                    Guest moment
                   </p>
 
                   <h4>{lightbox.user}</h4>
@@ -1203,9 +1565,13 @@ export default function CommunityGallery({
 
                 <button
                   type="button"
-                  onClick={() => like(lightbox.id)}
+                  onClick={() =>
+                    like(lightbox.id)
+                  }
                   className={`gallery-lightbox-like ${
-                    likedIds[lightbox.id] ? 'is-liked' : ''
+                    likedIds[lightbox.id]
+                      ? 'is-liked'
+                      : ''
                   }`}
                   aria-label={
                     likedIds[lightbox.id]
@@ -1221,12 +1587,13 @@ export default function CommunityGallery({
                         : 'none'
                     }
                   />
-                  {lightbox.likes || 0}
+
+                  {lightbox.likes}
                 </button>
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </section>
   )

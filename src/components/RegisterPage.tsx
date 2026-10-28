@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react'
+
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import Swal from 'sweetalert2'
 import {
   ArrowLeft,
   CheckCircle2,
   Clock3,
-  Lock,
   Mail,
   Phone,
   RefreshCw,
@@ -16,284 +16,502 @@ import {
 } from 'lucide-react'
 import ThemeToggle from './ThemeToggle'
 
-const ACCESS_KEY = 'zen-cafe-gallery-email-access-v32'
-const PROFILE_KEY = 'zen-cafe-customer-registration-v149'
 const SESSION_TOKEN_KEY = 'zen-cafe-customer-session-token-v1'
-const WAIT_MS = 24 * 60 * 60 * 1000
 
-type AccessRecord = {
-  registeredAt: number
-  emailVerified?: boolean
+type Customer = {
+  id?: string
+  name: string
+  email: string
+  phone?: string
   emailVerifiedAt?: string | null
   galleryEligibleAt?: string | null
 }
 
-type CustomerProfile = {
-  name: string
-  email: string
-  phone: string
-  registeredAt: number
-  emailVerified?: boolean
+type GalleryStatus = {
+  authenticated: boolean
+  verified: boolean
+  canUpload: boolean
+  nextUploadAt: string | null
+  customer: Customer | null
 }
 
-const normalizeEmail = (value: string) => value.trim().toLowerCase()
-const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value))
-const validName = (value: string) => value.trim().length >= 2
+type ApiResponse = {
+  success?: boolean
+  authenticated?: boolean
+  error?: string
+  message?: string
+  token?: string
+  expiresAt?: string
+  customer?: Customer
+  delivery?: {
+    simulated?: boolean
+    devVerificationUrl?: string
+  }
+}
+
+const normalizeEmail = (value: string) =>
+  value.trim().toLowerCase()
+
+const validEmail = (value: string) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value))
+
+const validName = (value: string) =>
+  value.trim().length >= 2
+
 const validPhone = (value: string) => {
   const digits = value.replace(/\D/g, '')
   return digits.length >= 7 && digits.length <= 15
 }
 
-const readAccessMap = () => {
-  try {
-    return JSON.parse(localStorage.getItem(ACCESS_KEY) || '{}') as Record<string, AccessRecord>
-  } catch {
-    return {}
-  }
-}
-
-const readProfiles = () => {
-  try {
-    return JSON.parse(localStorage.getItem(PROFILE_KEY) || '{}') as Record<string, CustomerProfile>
-  } catch {
-    return {}
-  }
-}
-
 const formatRemaining = (ms: number) => {
   const total = Math.max(0, Math.ceil(ms / 1000))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+
+  return [
+    hours,
+    minutes,
+    seconds,
+  ]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+}
+
+async function readJson(response: Response): Promise<ApiResponse> {
+  const data = await response.json().catch(() => null)
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('The server returned an invalid response.')
+  }
+
+  return data as ApiResponse
+}
+
+function saveSession(token: string) {
+  localStorage.setItem(SESSION_TOKEN_KEY, token)
+}
+
+function getSessionToken() {
+  return localStorage.getItem(SESSION_TOKEN_KEY)
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_TOKEN_KEY)
+}
+
+function clearUrlToken() {
+  const url = new URL(window.location.href)
+
+  url.searchParams.delete('verify')
+  url.searchParams.delete('gallery_login')
+
+  window.history.replaceState(
+    {},
+    '',
+    `${url.pathname}${url.search}${url.hash}`
+  )
+}
+
+function redirectToGallery() {
+  window.location.replace('/#gallery')
 }
 
 export default function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [password, setPassword] = useState('')
-  const [record, setRecord] = useState<AccessRecord | null>(null)
+
+  const [mode, setMode] = useState<'register' | 'signin'>('register')
+
   const [message, setMessage] = useState('')
   const [isError, setIsError] = useState(false)
+
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
-  const [verifiedNow, setVerifiedNow] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+
   const [devVerifyUrl, setDevVerifyUrl] = useState<string | null>(null)
+
   const [now, setNow] = useState(Date.now())
 
-  // Clock tick for 24h countdown
+  const [galleryStatus, setGalleryStatus] = useState<GalleryStatus>({
+    authenticated: false,
+    verified: false,
+    canUpload: false,
+    nextUploadAt: null,
+    customer: null,
+  })
+
+  const linkProcessed = useRef(false)
+
+  const authenticated = galleryStatus.authenticated
+  const verified = galleryStatus.verified
+
+  const cooldownRemaining = galleryStatus.nextUploadAt
+    ? Math.max(
+        0,
+        new Date(galleryStatus.nextUploadAt).getTime() - now
+      )
+    : 0
+
+  const ready =
+    authenticated &&
+    verified &&
+    cooldownRemaining === 0
+
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
     return () => window.clearInterval(timer)
   }, [])
 
-  // Check URL query parameters for ?verify=<token>
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const verifyToken = params.get('verify')
-    if (verifyToken) {
-      setLoading(true)
-      fetch(`/api/auth/verify?token=${encodeURIComponent(verifyToken)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.success && data.customer) {
-            setVerifiedNow(true)
-            setName(data.customer.name || '')
-            setEmail(data.customer.email || '')
-            setPhone(data.customer.phone || '')
-            setIsError(false)
-            setMessage('Email verified successfully! Your Zen Café customer access is now active.')
+  /**
+   * Validate an existing session against PostgreSQL.
+   * The local token is not treated as proof of verification.
+   */
+  const checkExistingSession = async () => {
+    const token = getSessionToken()
 
-            if (data.token) {
-              localStorage.setItem(SESSION_TOKEN_KEY, data.token)
-            }
-
-            const key = normalizeEmail(data.customer.email)
-            const accessMap = readAccessMap()
-            const registeredAt = Date.now()
-            const access: AccessRecord = {
-              registeredAt,
-              emailVerified: true,
-              emailVerifiedAt: data.customer.emailVerifiedAt,
-              galleryEligibleAt: data.customer.galleryEligibleAt,
-            }
-            accessMap[key] = access
-            setRecord(access)
-
-            try {
-              localStorage.setItem(ACCESS_KEY, JSON.stringify(accessMap))
-            } catch {
-              // Ignore
-            }
-
-            Swal.fire({
-              title: 'Email Verified!',
-              text: 'Welcome to Zen Café! Your customer access is now active. Redirecting to the community gallery...',
-              icon: 'success',
-              confirmButtonColor: '#a32722',
-              confirmButtonText: 'Open Gallery Now',
-              timer: 3500,
-              timerProgressBar: true,
-            }).then(() => {
-              window.location.href = '/#gallery'
-            })
-          } else {
-            setIsError(true)
-            setMessage(data.error || 'Verification token is invalid or has expired.')
-            Swal.fire({
-              title: 'Verification Failed',
-              text: data.error || 'Verification token is invalid or has expired.',
-              icon: 'error',
-              confirmButtonColor: '#a32722',
-            })
-          }
-        })
-        .catch(() => {
-          setIsError(true)
-          setMessage('Unable to verify email due to network error.')
-        })
-        .finally(() => setLoading(false))
-    }
-  }, [])
-
-  // Auto-fill from local cache when email changes
-  useEffect(() => {
-    if (!validEmail(email)) {
-      setRecord(null)
+    if (!token) {
+      setCheckingSession(false)
       return
     }
-    const key = normalizeEmail(email)
-    const cached = readAccessMap()[key] || null
-    setRecord(cached)
 
-    const saved = readProfiles()[key]
-    if (saved) {
-      if (!name) setName(saved.name || '')
-      if (!phone) setPhone(saved.phone || '')
+    try {
+      const response = await fetch('/api/auth/me', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      })
+
+      const data = await response.json()
+
+      if (
+        !response.ok ||
+        !data.authenticated ||
+        !data.customer?.emailVerified
+      ) {
+        clearSession()
+        setCheckingSession(false)
+        return
+      }
+
+      const customer = data.customer
+
+      setName(customer.name || '')
+      setEmail(customer.email || '')
+      setPhone(customer.phone || '')
+
+      setGalleryStatus({
+        authenticated: true,
+        verified: true,
+        canUpload: true,
+        nextUploadAt: customer.galleryEligibleAt || null,
+        customer,
+      })
+    } catch {
+      // Keep the stored token for a later retry if the network fails.
+    } finally {
+      setCheckingSession(false)
+    }
+  }
+
+  /**
+   * Handle new-customer verification links and
+   * returning-customer gallery sign-in links.
+   */
+  useEffect(() => {
+    if (linkProcessed.current) return
+
+    linkProcessed.current = true
+
+    const params = new URLSearchParams(window.location.search)
+
+    const verifyToken = params.get('verify')
+    const galleryLoginToken = params.get('gallery_login')
+
+    if (!verifyToken && !galleryLoginToken) {
+      void checkExistingSession()
+      return
     }
 
-    // Check PostgreSQL gallery readiness status
-    fetch('/api/gallery/check-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: key }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.registered && data.isVerified) {
-          setRecord(prev => ({
-            ...(prev || { registeredAt: Date.now() }),
-            emailVerified: true,
-          }))
-        }
-      })
-      .catch(() => {})
-  }, [email])
+    const processEmailLink = async () => {
+      setLoading(true)
+      setCheckingSession(true)
+      setMessage('')
 
-  // Submit registration to backend
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
+      // Remove the sensitive token from the visible URL immediately.
+      clearUrlToken()
+
+      try {
+        let response: Response
+
+        if (galleryLoginToken) {
+          response = await fetch('/api/auth/gallery-login/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              token: galleryLoginToken,
+            }),
+          })
+        } else {
+          response = await fetch('/api/auth/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              token: verifyToken,
+            }),
+          })
+        }
+
+        const data = await readJson(response)
+
+        if (
+          !response.ok ||
+          !data.success ||
+          !data.token ||
+          !data.customer
+        ) {
+          throw new Error(
+            data.error ||
+            'The email link is invalid, expired, or already used.'
+          )
+        }
+
+        saveSession(data.token)
+
+        const customer = data.customer
+
+        setName(customer.name || '')
+        setEmail(customer.email || '')
+        setPhone(customer.phone || '')
+
+        setGalleryStatus({
+          authenticated: true,
+          verified: true,
+          canUpload: true,
+          nextUploadAt: customer.galleryEligibleAt || null,
+          customer,
+        })
+
+        setIsError(false)
+
+        setMessage(
+          galleryLoginToken
+            ? 'Welcome back! Your gallery session is now active.'
+            : 'Email verified successfully! Your gallery access is now active.'
+        )
+
+        await Swal.fire({
+          title: galleryLoginToken
+            ? 'Welcome Back!'
+            : 'Email Verified!',
+          text:
+            'Your Community Gallery access is ready. You can now continue to the gallery.',
+          icon: 'success',
+          confirmButtonColor: '#a32722',
+          confirmButtonText: 'Open Gallery',
+          timer: 3500,
+          timerProgressBar: true,
+        })
+
+        redirectToGallery()
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Unable to verify the email link.'
+
+        setIsError(true)
+        setMessage(errorMessage)
+
+        await Swal.fire({
+          title: 'Link Verification Failed',
+          text: errorMessage,
+          icon: 'error',
+          confirmButtonColor: '#a32722',
+        })
+
+        setMode(galleryLoginToken ? 'signin' : 'register')
+        await checkExistingSession()
+      } finally {
+        setLoading(false)
+        setCheckingSession(false)
+      }
+    }
+
+    void processEmailLink()
+  }, [])
+
+  /**
+   * Register a new customer.
+   */
+  const submitRegistration = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
     if (!validName(name)) {
       setIsError(true)
       setMessage('Enter your full name (at least 2 letters).')
       return
     }
+
     if (!validEmail(email)) {
       setIsError(true)
       setMessage('Enter a valid email address.')
       return
     }
+
     if (!validPhone(phone)) {
       setIsError(true)
-      setMessage('Enter a valid phone number (at least 7 digits).')
-      return
-    }
-    if (password && password.length < 6) {
-      setIsError(true)
-      setMessage('Password must be at least 6 characters.')
+      setMessage('Enter a valid phone number (7 to 15 digits).')
       return
     }
 
     setLoading(true)
-    setMessage('')
     setIsError(false)
+    setMessage('')
     setDevVerifyUrl(null)
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const response = await fetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           name: name.trim(),
           email: normalizeEmail(email),
           phone: phone.trim(),
-          ...(password ? { password } : {}),
         }),
       })
 
-      const data = await res.json()
+      const data = await readJson(response)
 
-      if (!res.ok || !data.success) {
-        setIsError(true)
-        setMessage(data.error || 'Registration failed. Please try again.')
-        Swal.fire({
-          title: 'Registration Notice',
-          text: data.error || 'Registration failed. Please try again.',
-          icon: 'warning',
-          confirmButtonColor: '#a32722',
-        })
-        return
+      if (!response.ok || !data.success) {
+        if (data.error && response.status === 409) {
+          setMode('signin')
+          setMessage(
+            'This email is already registered. Use the returning-customer sign-in option.'
+          )
+          setIsError(false)
+          return
+        }
+
+        throw new Error(
+          data.error || 'Registration failed. Please try again.'
+        )
       }
 
-      const key = normalizeEmail(email)
-      const accessMap = readAccessMap()
-      const access: AccessRecord = {
-        registeredAt: Date.now(),
-        emailVerified: false,
-      }
-      accessMap[key] = access
-
-      const profiles = readProfiles()
-      profiles[key] = {
-        name: name.trim(),
-        email: key,
-        phone: phone.trim(),
-        registeredAt: access.registeredAt,
-        emailVerified: false,
-      }
-
-      try {
-        localStorage.setItem(ACCESS_KEY, JSON.stringify(accessMap))
-        localStorage.setItem(PROFILE_KEY, JSON.stringify(profiles))
-      } catch {
-        // LocalStorage quota
-      }
-
-      setRecord(access)
-      setIsError(false)
-      setMessage(data.message || 'Registration saved! Please check your email for your verification link.')
-
-      Swal.fire({
-        title: 'Registration Received!',
-        text: 'Please check your email and click the verification link to activate your customer access.',
-        icon: 'success',
-        confirmButtonColor: '#a32722',
-        confirmButtonText: 'Understood',
-      })
+      setMessage(
+        data.message ||
+        'Registration received. Check your email for the verification link.'
+      )
 
       if (data.delivery?.devVerificationUrl) {
         setDevVerifyUrl(data.delivery.devVerificationUrl)
       }
-    } catch {
+
+      await Swal.fire({
+        title: 'Registration Received!',
+        text:
+          'Please check your inbox and click the verification link to activate your Community Gallery access.',
+        icon: 'success',
+        confirmButtonColor: '#a32722',
+        confirmButtonText: 'Understood',
+      })
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unable to contact the registration server.'
+
       setIsError(true)
-      setMessage('Connection error: Unable to contact registration server.')
+      setMessage(errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  // Handle Resend Verification
+  /**
+   * Returning customers request a 15-minute
+   * single-use email sign-in link.
+   */
+  const requestGallerySignIn = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault()
+
+    if (!validEmail(email)) {
+      setIsError(true)
+      setMessage('Enter your registered email address.')
+      return
+    }
+
+    setLoading(true)
+    setIsError(false)
+    setMessage('')
+    setDevVerifyUrl(null)
+
+    try {
+      const response = await fetch(
+        '/api/auth/gallery-login/request',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: normalizeEmail(email),
+          }),
+        }
+      )
+
+      const data = await readJson(response)
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.error || 'Unable to request a sign-in link.'
+        )
+      }
+
+      setMessage(
+        data.message ||
+        'If this email is registered and verified, a sign-in link will arrive shortly.'
+      )
+
+      await Swal.fire({
+        title: 'Check Your Inbox',
+        text:
+          'If your email is registered and verified, we will send you a secure gallery sign-in link valid for 15 minutes.',
+        icon: 'success',
+        confirmButtonColor: '#a32722',
+        confirmButtonText: 'Understood',
+      })
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unable to request a sign-in link.'
+
+      setIsError(true)
+      setMessage(errorMessage)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /**
+   * Resend verification for an unverified customer.
+   */
   const handleResend = async () => {
     if (!validEmail(email)) {
       setIsError(true)
@@ -302,51 +520,91 @@ export default function RegisterPage() {
     }
 
     setResending(true)
-    setMessage('')
     setIsError(false)
+    setMessage('')
+    setDevVerifyUrl(null)
 
     try {
-      const res = await fetch('/api/auth/resend-verification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: normalizeEmail(email) }),
-      })
-      const data = await res.json()
-      if (res.ok && data.success) {
-        setIsError(false)
-        setMessage(data.message || 'Verification link sent! Check your inbox.')
-        if (data.delivery?.devVerificationUrl) {
-          setDevVerifyUrl(data.delivery.devVerificationUrl)
+      const response = await fetch(
+        '/api/auth/resend-verification',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: normalizeEmail(email),
+          }),
         }
-      } else {
-        setIsError(true)
-        setMessage(data.error || 'Failed to resend verification.')
+      )
+
+      const data = await readJson(response)
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.error || 'Unable to resend the verification email.'
+        )
       }
-    } catch {
+
+      setMessage(
+        data.message ||
+        'If your account is awaiting verification, a new link will be sent.'
+      )
+
+      if (data.delivery?.devVerificationUrl) {
+        setDevVerifyUrl(data.delivery.devVerificationUrl)
+      }
+
+      await Swal.fire({
+        title: 'Request Received',
+        text:
+          'If your account is awaiting verification, please check your inbox for a new link.',
+        icon: 'success',
+        confirmButtonColor: '#a32722',
+      })
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unable to resend the verification email.'
+
       setIsError(true)
-      setMessage('Connection error while requesting email resend.')
+      setMessage(errorMessage)
     } finally {
       setResending(false)
     }
   }
 
-  const remaining = record ? Math.max(0, record.registeredAt + WAIT_MS - now) : WAIT_MS
-  const isVerified = Boolean(record?.emailVerified || verifiedNow)
-  const ready = isVerified && remaining === 0
+  const switchMode = (nextMode: 'register' | 'signin') => {
+    setMode(nextMode)
+    setMessage('')
+    setIsError(false)
+    setDevVerifyUrl(null)
+  }
 
   return (
     <main className="zen-register-page min-h-screen">
       <header className="zen-standalone-header">
-        <a href="/" className="zen-standalone-back" aria-label="Back to Zen Café">
+        <a
+          href="/"
+          className="zen-standalone-back"
+          aria-label="Back to Zen Café"
+        >
           <ArrowLeft size={18} />
         </a>
+
         <a href="/" className="zen-standalone-brand">
           <img src="/assets/zen-logo.png" alt="Zen Café" />
           <span>
             <b>ZEN CAFÉ</b>
-            <small>Customer registration</small>
+            <small>
+              {mode === 'signin'
+                ? 'Customer sign-in'
+                : 'Customer registration'}
+            </small>
           </span>
         </a>
+
         <ThemeToggle />
       </header>
 
@@ -356,89 +614,227 @@ export default function RegisterPage() {
 
         <div className="zen-register-copy">
           <p className="kicker">
-            <Sparkles size={13} /> Customer Access & Verification
+            <Sparkles size={13} />
+            Customer Access & Verification
           </p>
+
           <h1>
-            Register once.<br />
+            Share your moments.
+            <br />
             <span>Stay connected.</span>
           </h1>
+
           <p>
-            Add your name, email and phone number. Verifying your email grants you genuine customer access
-            and starts the 24-hour community gallery timer, so you can share up to two Zen moments.
+            Join the Zen Café community, verify your email,
+            and share up to two photos from your café experience.
+            Your photos appear in the gallery after a successful upload.
+            You can upload again after 24 hours.
           </p>
         </div>
 
-        <form onSubmit={submit} className="zen-register-card zen-customer-register-card">
+        <div className="zen-register-card zen-customer-register-card">
           <div className="zen-register-icon">
-            <UserRound size={25} />
+            {mode === 'signin' ? (
+              <ShieldCheck size={25} />
+            ) : (
+              <UserRound size={25} />
+            )}
           </div>
-          <p className="kicker">Customer registration</p>
-          <h2>Your details</h2>
 
-          <div className="zen-register-fields">
-            <label className="field-label">
-              Full name
-              <div className="zen-register-input">
-                <UserRound size={17} />
-                <input
-                  value={name}
-                  disabled={loading}
-                  onChange={e => {
-                    setName(e.target.value)
-                    setMessage('')
-                  }}
-                  type="text"
-                  autoComplete="name"
-                  placeholder="Your name"
-                />
-              </div>
-            </label>
-</div>
-            <label className="field-label">
-              Phone number
-              <div className="zen-register-input">
-                <Phone size={17} />
-                <input
-                  value={phone}
-                  disabled={loading}
-                  onChange={e => {
-                    setPhone(e.target.value)
-                    setMessage('')
-                  }}
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  placeholder="+94 77 123 4567"
-                />
-              </div>
-            </label>
+          <p className="kicker">
+            {mode === 'signin'
+              ? 'Returning customer'
+              : 'Customer registration'}
+          </p>
 
-            <label className="field-label zen-register-field-full">
-              Email address
-              <div className="zen-register-input">
-                <Mail size={17} />
-                <input
-                  value={email}
-                  disabled={loading}
-                  onChange={e => {
-                    setEmail(e.target.value)
-                    setMessage('')
-                  }}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                />
-              </div>
-            </label>
+          <h2>
+            {mode === 'signin'
+              ? 'Welcome back'
+              : 'Your details'}
+          </h2>
 
-          <button
-            className="primary-pill zen-register-submit"
-            type="submit"
-            disabled={loading}
-          >
-            <ShieldCheck size={15} />
-            {loading ? 'Connecting...' : isVerified ? 'Update registration' : record ? 'Re-send or Update Details' : 'Register Customer'}
-          </button>
+          <div className="flex gap-2 mt-4 mb-5">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => switchMode('register')}
+              className={`flex-1 rounded-full px-3 py-2.5 text-xs font-bold transition-colors ${
+                mode === 'register'
+                  ? 'bg-[#a32722] text-white'
+                  : 'border border-[#a32722]/20 text-[#a32722]'
+              }`}
+            >
+              New Customer
+            </button>
+
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => switchMode('signin')}
+              className={`flex-1 rounded-full px-3 py-2.5 text-xs font-bold transition-colors ${
+                mode === 'signin'
+                  ? 'bg-[#a32722] text-white'
+                  : 'border border-[#a32722]/20 text-[#a32722]'
+              }`}
+            >
+              Returning Customer
+            </button>
+          </div>
+
+          {authenticated && verified && (
+            <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+              <div className="flex items-center gap-2 text-sm font-bold">
+                <CheckCircle2 size={17} />
+                You're signed in
+              </div>
+
+              <p className="mt-1 text-xs">
+                {galleryStatus.customer?.email}
+              </p>
+
+              <a
+                href="/#gallery"
+                className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-[#a32722] underline"
+              >
+                Open Community Gallery
+              </a>
+            </div>
+          )}
+
+          {mode === 'register' ? (
+            <form onSubmit={submitRegistration}>
+              <div className="zen-register-fields">
+                <label className="field-label">
+                  Full name
+                  <div className="zen-register-input">
+                    <UserRound size={17} />
+                    <input
+                      value={name}
+                      disabled={loading}
+                      onChange={event => {
+                        setName(event.target.value)
+                        setMessage('')
+                      }}
+                      type="text"
+                      autoComplete="name"
+                      placeholder="Your name"
+                      required
+                    />
+                  </div>
+                </label>
+
+                <label className="field-label">
+                  Phone number
+                  <div className="zen-register-input">
+                    <Phone size={17} />
+                    <input
+                      value={phone}
+                      disabled={loading}
+                      onChange={event => {
+                        setPhone(event.target.value)
+                        setMessage('')
+                      }}
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="+94 77 123 4567"
+                      required
+                    />
+                  </div>
+                </label>
+
+                <label className="field-label zen-register-field-full">
+                  Email address
+                  <div className="zen-register-input">
+                    <Mail size={17} />
+                    <input
+                      value={email}
+                      disabled={loading}
+                      onChange={event => {
+                        setEmail(event.target.value)
+                        setMessage('')
+                      }}
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      required
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <button
+                className="primary-pill zen-register-submit"
+                type="submit"
+                disabled={loading || checkingSession}
+              >
+                <ShieldCheck size={15} />
+                {loading
+                  ? 'Registering...'
+                  : 'Register Customer'}
+              </button>
+
+              <button
+                type="button"
+                disabled={resending || loading}
+                onClick={handleResend}
+                className="mt-3 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-[#a32722] hover:underline w-full py-1.5"
+              >
+                <RefreshCw
+                  size={12}
+                  className={resending ? 'animate-spin' : ''}
+                />
+                {resending
+                  ? 'Sending link...'
+                  : 'Resend verification email'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={requestGallerySignIn}>
+              <p className="text-sm mb-5 opacity-75">
+                Already registered and verified? Enter your email
+                and we'll send you a secure sign-in link.
+                No password required.
+              </p>
+
+              <div className="zen-register-fields">
+                <label className="field-label zen-register-field-full">
+                  Registered email address
+                  <div className="zen-register-input">
+                    <Mail size={17} />
+                    <input
+                      value={email}
+                      disabled={loading}
+                      onChange={event => {
+                        setEmail(event.target.value)
+                        setMessage('')
+                      }}
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      required
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <button
+                className="primary-pill zen-register-submit"
+                type="submit"
+                disabled={loading || checkingSession}
+              >
+                <Send size={15} />
+                {loading
+                  ? 'Sending sign-in link...'
+                  : 'Email Me a Sign-In Link'}
+              </button>
+
+              <p className="text-xs text-center mt-3 opacity-65">
+                Your sign-in link is valid for 15 minutes
+                and can only be used once.
+              </p>
+            </form>
+          )}
 
           {message && (
             <div
@@ -449,69 +845,78 @@ export default function RegisterPage() {
               }`}
               role="status"
             >
-              {isError ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
+              {isError ? (
+                <ShieldAlert size={14} />
+              ) : (
+                <CheckCircle2 size={14} />
+              )}
               <span>{message}</span>
             </div>
           )}
 
-          {/* Dev test link when in local mode */}
           {devVerifyUrl && (
             <div className="mt-3 p-3 rounded-2xl bg-[#fff8ef] border border-[#a32722]/15 text-xs text-[#695950]">
-              <span className="font-bold text-[#a32722] block mb-1">Simulated Email Delivery (Test Mode):</span>
+              <span className="font-bold text-[#a32722] block mb-1">
+                Local Email Test
+              </span>
               <a
                 href={devVerifyUrl}
-                className="inline-flex items-center gap-1.5 font-semibold text-[#a32722] underline break-all"
+                className="font-semibold text-[#a32722] underline break-all"
               >
-                Click here to verify email now →
+                Open verification link
               </a>
             </div>
           )}
 
-          {/* Unverified Resend Option */}
-          {record && !isVerified && (
-            <button
-              type="button"
-              disabled={resending}
-              onClick={handleResend}
-              className="mt-3 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-[#a32722] hover:underline w-full py-1.5"
-            >
-              <RefreshCw size={12} className={resending ? 'animate-spin' : ''} />
-              {resending ? 'Sending link...' : 'Resend verification email'}
-            </button>
-          )}
-
           <div
-            className={`zen-register-status ${record ? 'is-registered' : ''} ${
-              ready ? 'is-ready' : ''
-            }`}
+            className={`zen-register-status ${
+              authenticated ? 'is-registered' : ''
+            } ${ready ? 'is-ready' : ''}`}
           >
-            <span>{ready ? <CheckCircle2 size={19} /> : <Clock3 size={19} />}</span>
+            <span>
+              {ready ? (
+                <CheckCircle2 size={19} />
+              ) : (
+                <Clock3 size={19} />
+              )}
+            </span>
+
             <div>
               <b>
-                {ready
+                {checkingSession
+                  ? 'Checking customer access'
+                  : ready
                   ? 'Gallery upload access ready'
-                  : isVerified
-                  ? 'Email verified · Cooldown active'
-                  : record
-                  ? 'Pending email verification'
-                  : 'Not registered yet'}
+                  : authenticated && verified
+                  ? '24-hour gallery cooldown active'
+                  : mode === 'signin'
+                  ? 'Secure email sign-in'
+                  : 'Email verification required'}
               </b>
+
               <small>
-                {ready
-                  ? 'You can now open the gallery and upload up to 2 photos.'
-                  : isVerified
-                  ? `Gallery unlocks in ${formatRemaining(remaining)}.`
-                  : record
-                  ? 'Please click the verification link sent to your email.'
-                  : 'Register your details to start the 24-hour gallery timer.'}
+                {checkingSession
+                  ? 'Please wait while we verify your session.'
+                  : ready
+                  ? 'You can upload up to 2 photos.'
+                  : authenticated && verified
+                  ? `You can upload again in ${formatRemaining(
+                      cooldownRemaining
+                    )}.`
+                  : mode === 'signin'
+                  ? 'Use your verified email to receive a sign-in link.'
+                  : 'Register and verify your email to upload immediately.'}
               </small>
             </div>
           </div>
 
-          <a className="secondary-pill zen-register-gallery-link" href="/#gallery">
+          <a
+            className="secondary-pill zen-register-gallery-link"
+            href="/#gallery"
+          >
             Open Gallery
           </a>
-        </form>
+        </div>
       </section>
     </main>
   )
