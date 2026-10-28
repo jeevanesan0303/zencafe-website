@@ -1,0 +1,337 @@
+/* ==========================================================
+   ZEN QUIET DOCK
+   Fixed right alignment • One-time door introduction
+========================================================== */
+
+.zen-quiet-dock {
+  --zqd-size: 44px;
+  --zqd-gap: 8px;
+  --zqd-bg: #fffaf4;
+  --zqd-text: #69452d;
+  --zqd-border: rgba(105, 69, 45, 0.18);
+  --zqd-shadow: 0 4px 14px rgba(44, 28, 17, 0.12);
+  --zqd-instagram: #b92f70;
+  --zqd-gift: #ac6920;
+
+  position: fixed !important;
+  top: auto !important;
+  left: auto !important;
+  right: calc(
+    10px + env(safe-area-inset-right, 0px)
+  ) !important;
+  bottom: calc(
+    84px + env(safe-area-inset-bottom, 0px)
+  ) !important;
+
+  z-index: 80;
+
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  justify-content: flex-end !important;
+  gap: var(--zqd-gap) !important;
+
+  box-sizing: border-box;
+  width: var(--zqd-size) !important;
+  min-width: var(--zqd-size) !important;
+  max-width: var(--zqd-size) !important;
+  height: auto !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0;
+  background: transparent;
+
+  overflow: visible !important;
+  transform: none !important;
+  animation: none !important;
+
+  /* Only the actual buttons intercept taps. */
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .zen-quiet-dock {
+  --zqd-bg: #251e19;
+  --zqd-text: #f2d9b4;
+  --zqd-border: rgba(242, 217, 180, 0.2);
+  --zqd-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+  --zqd-instagram: #f293bb;
+  --zqd-gift: #efbb62;
+}
+
+.zen-quiet-dock,
+.zen-quiet-dock * {
+  box-sizing: border-box;
+}
+
+/* All six buttons occupy exactly the same width. */
+
+.zen-quiet-dock > .zen-quiet-dock__button {
+  position: relative;
+  display: grid;
+  place-items: center;
+
+  flex: 0 0 var(--zqd-size);
+  align-self: flex-end;
+
+  width: var(--zqd-size);
+  min-width: var(--zqd-size);
+  max-width: var(--zqd-size);
+  height: var(--zqd-size);
+  min-height: var(--zqd-size);
+
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--zqd-border);
+  border-radius: 50%;
+
+  background: var(--zqd-bg);
+  color: var(--zqd-text);
+  box-shadow: var(--zqd-shadow);
+
+  font-family: inherit;
+  text-decoration: none;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+
+  overflow: visible;
+  isolation: isolate;
+  pointer-events: auto;
+
+  transform: none;
+  animation: none;
+  transition: border-color 180ms ease;
+
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent decorative capsules from older generic styles. */
+
+.zen-quiet-dock > .zen-quiet-dock__button::before,
+.zen-quiet-dock > .zen-quiet-dock__button::after {
+  content: none;
+  display: none;
+}
+
+.zen-quiet-dock__button:focus-visible {
+  outline: 2px solid var(--zqd-text);
+  outline-offset: 3px;
+}
+
+@media (hover: hover) {
+  .zen-quiet-dock__button:hover {
+    border-color: var(--zqd-text);
+  }
+}
+
+/* Door icon stays in its original right-hand position. */
+
+.zen-quiet-dock__door-icon {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+
+  background: var(--zqd-bg);
+  color: var(--zqd-text);
+  pointer-events: none;
+}
+
+/*
+ * The label is absolutely positioned.
+ * It never increases the dock width or moves other icons.
+ */
+
+.zen-quiet-dock__intro {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 1;
+
+  display: flex;
+  align-items: center;
+
+  width: 174px;
+  max-width: calc(100vw - 24px);
+  height: var(--zqd-size);
+
+  padding:
+    0
+    calc(var(--zqd-size) + 8px)
+    0
+    15px;
+
+  border: 1px solid var(--zqd-border);
+  border-radius: 999px;
+
+  background: var(--zqd-bg);
+  color: var(--zqd-text);
+  box-shadow: var(--zqd-shadow);
+
+  white-space: nowrap;
+  pointer-events: none;
+
+  opacity: 0;
+  clip-path: inset(
+    0 0 0 calc(100% - var(--zqd-size)) round 999px
+  );
+
+  animation: zenQuietDoorIntro 4s
+    cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+}
+
+.zen-quiet-dock__intro > span {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+/* Expand once, hold briefly, then return to icon-only. */
+
+@keyframes zenQuietDoorIntro {
+  0%,
+  8% {
+    opacity: 0;
+    clip-path: inset(
+      0 0 0 calc(100% - var(--zqd-size)) round 999px
+    );
+  }
+
+  24%,
+  74% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0 round 999px);
+  }
+
+  94%,
+  100% {
+    opacity: 0;
+    clip-path: inset(
+      0 0 0 calc(100% - var(--zqd-size)) round 999px
+    );
+  }
+}
+
+/* Social icons */
+
+.zen-quiet-dock > .zen-quiet-dock__instagram {
+  color: var(--zqd-instagram);
+}
+
+.zen-quiet-dock__whatsapp-logo {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #20c763;
+  color: #ffffff;
+}
+
+.zen-quiet-dock > .zen-quiet-dock__offers {
+  color: var(--zqd-gift);
+}
+
+.zen-quiet-dock__badge {
+  position: absolute;
+  top: -4px;
+  right: -3px;
+  z-index: 3;
+
+  display: grid;
+  place-items: center;
+
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 2px solid var(--zqd-bg);
+  border-radius: 999px;
+
+  background: #a73227;
+  color: #ffffff;
+
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Delivery logos */
+
+.zen-quiet-dock > .zen-quiet-dock__pickme {
+  background: #ffffff;
+}
+
+.zen-quiet-dock > .zen-quiet-dock__uber {
+  background: #000000;
+}
+
+.zen-quiet-dock__button > img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  border-radius: 50%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Mobile */
+
+@media (max-width: 640px) {
+  .zen-quiet-dock {
+    --zqd-gap: 6px;
+
+    right: calc(
+      6px + env(safe-area-inset-right, 0px)
+    ) !important;
+
+    bottom: calc(
+      76px + env(safe-area-inset-bottom, 0px)
+    ) !important;
+  }
+}
+
+/* Short screens: keep every link reachable by scrolling. */
+
+@media (max-height: 500px) {
+  .zen-quiet-dock {
+    bottom: calc(
+      8px + env(safe-area-inset-bottom, 0px)
+    ) !important;
+
+    max-height: calc(
+      100dvh - 88px - env(safe-area-inset-bottom, 0px)
+    );
+
+    justify-content: flex-start !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    pointer-events: auto;
+  }
+
+  .zen-quiet-dock__intro {
+    display: none;
+  }
+}
+
+/* No sliding animation when reduced motion is requested. */
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-quiet-dock__intro {
+    animation: none;
+    opacity: 1;
+    clip-path: none;
+  }
+
+  .zen-quiet-dock__button {
+    transition: none;
+  }
+}

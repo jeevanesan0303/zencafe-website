@@ -1,0 +1,2331 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&display=swap');
+
+/* =====================================================
+   BASE
+===================================================== */
+
+:root {
+  font-family: "DM Sans", sans-serif;
+  font-synthesis: none;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+}
+
+.zg-page,
+.zg-page * {
+  box-sizing: border-box;
+}
+
+.zg-page {
+  /* Light theme */
+  --page-bg: #f6f3fd;
+  --page-rgb: 246 243 253;
+  --text: #171327;
+  --muted: #696078;
+  --accent: #8a27d5;
+  --accent-bright: #b83cef;
+  --accent-soft: #ab6be7;
+  --accent-rgb: 138 39 213;
+  --blue: #327dd8;
+  --border: rgb(127 67 182 / 17%);
+  --glass: rgb(255 255 255 / 83%);
+  --nav-surface: rgb(255 255 255 / 72%);
+  --panel:
+    linear-gradient(145deg, rgb(255 255 255 / 96%), rgb(245 240 255 / 95%));
+  --panel-shadow:
+    0 26px 75px rgb(81 39 133 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 95%);
+  --back-surface: linear-gradient(155deg, #ffffff, #f0e7ff);
+  --ticket-surface: linear-gradient(145deg, #ffffff, #f1e8fc);
+  --soft-surface: rgb(132 63 204 / 6%);
+  --emoji-opacity: 0.65;
+  --scene-opacity: 0.7;
+  --line-opacity: 0.35;
+  --card-glow-opacity: 0.25;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  color: var(--text);
+  background:
+    radial-gradient(
+      ellipse at 50% 12%,
+      #ffffff 0%,
+      transparent 45%
+    ),
+    radial-gradient(
+      circle at 4% 48%,
+      rgb(180 115 246 / 12%),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 96% 72%,
+      rgb(113 165 251 / 13%),
+      transparent 32%
+    ),
+    var(--page-bg);
+  transition: color 350ms ease, background 350ms ease;
+}
+
+.zg-page[data-theme="dark"] {
+  --page-bg: #090711;
+  --page-rgb: 9 7 17;
+  --text: #f8f4ff;
+  --muted: #b7aec7;
+  --accent: #ba85ff;
+  --accent-bright: #e361ff;
+  --accent-soft: #c39aef;
+  --accent-rgb: 186 133 255;
+  --blue: #71cfff;
+  --border: rgb(176 111 231 / 23%);
+  --glass: rgb(12 9 21 / 88%);
+  --nav-surface: rgb(22 15 35 / 76%);
+  --panel:
+    linear-gradient(145deg, rgb(31 19 48 / 96%), rgb(16 13 28 / 98%));
+  --panel-shadow:
+    0 32px 90px rgb(0 0 0 / 42%),
+    0 0 50px rgb(133 46 205 / 7%),
+    inset 0 1px 0 rgb(230 183 255 / 9%);
+  --back-surface: linear-gradient(155deg, #281b3b, #140e22);
+  --ticket-surface: linear-gradient(145deg, #302044, #1c142d);
+  --soft-surface: rgb(190 139 255 / 9%);
+  --emoji-opacity: 0.8;
+  --scene-opacity: 0.8;
+  --line-opacity: 0.68;
+  --card-glow-opacity: 0.42;
+
+  background:
+    radial-gradient(
+      ellipse at 50% 12%,
+      rgb(28 14 43 / 40%),
+      transparent 45%
+    ),
+    radial-gradient(
+      circle at 4% 48%,
+      rgb(122 35 205 / 17%),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 96% 72%,
+      rgb(46 91 211 / 12%),
+      transparent 32%
+    ),
+    var(--page-bg);
+}
+
+.zg-page button,
+.zg-page a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.zg-page button {
+  font-family: inherit;
+}
+
+.zg-page a {
+  text-decoration: none;
+}
+
+.zg-page button:focus-visible,
+.zg-page a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+
+.zg-page button:disabled {
+  cursor: default;
+}
+
+/* =====================================================
+   GAMING ENVIRONMENT
+===================================================== */
+
+.zg-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.zg-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgb(var(--accent-rgb) / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--accent-rgb) / 7%) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: linear-gradient(transparent, black 40%, transparent);
+}
+
+.zg-orb {
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  filter: blur(65px);
+  animation: zgOrbFloat 20s ease-in-out infinite alternate;
+}
+
+.zg-orb-purple {
+  top: 160px;
+  left: -300px;
+  background: rgb(163 57 239 / 15%);
+}
+
+.zg-orb-blue {
+  top: 480px;
+  right: -300px;
+  background: rgb(57 135 239 / 13%);
+  animation-delay: -8s;
+}
+
+.zg-orb-pink {
+  bottom: -300px;
+  left: 30%;
+  background: rgb(233 83 203 / 11%);
+  animation-delay: -13s;
+}
+
+@keyframes zgOrbFloat {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(30px, -35px, 0);
+  }
+}
+
+.zg-scene {
+  position: absolute;
+  top: 70px;
+  left: 0;
+  width: 100%;
+  height: 650px;
+  overflow: hidden;
+  opacity: var(--scene-opacity);
+}
+
+.zg-scene-wall {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      155deg,
+      transparent 15%,
+      rgb(142 66 255 / 16%) 15.2%,
+      transparent 15.6%
+    ),
+    linear-gradient(
+      25deg,
+      transparent 78%,
+      rgb(74 149 255 / 15%) 78.2%,
+      transparent 78.6%
+    );
+}
+
+.zg-scene-posters {
+  position: absolute;
+  top: 14px;
+  left: -25px;
+  display: flex;
+  gap: 14px;
+  width: 330px;
+  height: 245px;
+  transform: perspective(700px) rotateY(20deg) rotateZ(-5deg);
+  opacity: 0.5;
+}
+
+.zg-scene-poster {
+  flex: 1;
+  overflow: hidden;
+  border: 2px solid rgb(171 99 255 / 45%);
+  border-radius: 5px;
+  background: #201131;
+  box-shadow: 0 0 18px rgb(160 54 255 / 25%);
+}
+
+.zg-scene-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.zg-scene-monitor {
+  position: absolute;
+  top: 170px;
+  left: -25px;
+  width: clamp(220px, 28vw, 440px);
+  transform: perspective(900px) rotateY(12deg) rotateZ(-5deg);
+}
+
+.zg-monitor-screen {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  padding: 6px;
+  border: 2px solid #34244c;
+  border-radius: 13px;
+  background: #110c1d;
+  box-shadow:
+    0 0 0 1px rgb(167 95 255 / 40%),
+    0 0 35px rgb(59 124 255 / 25%),
+    0 30px 55px rgb(0 0 0 / 22%);
+}
+
+.zg-monitor-screen img {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+  object-position: center 35%;
+}
+
+.zg-monitor-neck {
+  display: block;
+  width: 18px;
+  height: 35px;
+  margin: 0 auto;
+  background: linear-gradient(90deg, #221c30, #615473, #221c30);
+}
+
+.zg-monitor-base {
+  display: block;
+  width: 115px;
+  height: 8px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: #332841;
+  box-shadow: 0 3px 15px rgb(147 67 242 / 25%);
+}
+
+.zg-scene-warrior {
+  position: absolute;
+  top: 0;
+  right: 2%;
+  width: clamp(270px, 33vw, 510px);
+  height: 490px;
+  mask-image:
+    linear-gradient(to right, transparent, black 28%, black 78%, transparent);
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, black 28%, black 78%, transparent);
+}
+
+.zg-scene-warrior img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 30%;
+  opacity: 0.75;
+  mask-image:
+    linear-gradient(to bottom, transparent, black 15%, black 68%, transparent);
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent, black 15%, black 68%, transparent);
+}
+
+.zg-scene-sign {
+  position: absolute;
+  top: 45px;
+  right: 2%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 22px 18px;
+  border: 1px solid rgb(var(--accent-rgb) / 22%);
+  border-radius: 12px;
+  color: var(--accent);
+  background: rgb(var(--page-rgb) / 30%);
+  transform: perspective(500px) rotateY(-18deg);
+  text-shadow: 0 0 20px rgb(var(--accent-rgb) / 45%);
+}
+
+.zg-scene-sign strong {
+  font-size: 38px;
+  letter-spacing: 0.08em;
+}
+
+.zg-scene-sign span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.zg-scene-sign small {
+  font-size: 8px;
+  letter-spacing: 0.2em;
+}
+
+.zg-scene-floor {
+  position: absolute;
+  right: -20%;
+  bottom: -70px;
+  left: -20%;
+  height: 260px;
+  background-image:
+    linear-gradient(rgb(var(--accent-rgb) / 12%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--accent-rgb) / 12%) 1px, transparent 1px);
+  background-size: 80px 60px;
+  transform: perspective(400px) rotateX(58deg);
+  mask-image: linear-gradient(transparent, black, transparent);
+}
+
+.zg-scene-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 48%,
+      rgb(var(--page-rgb) / 65%) 75%,
+      var(--page-bg)
+    ),
+    linear-gradient(
+      to right,
+      transparent,
+      rgb(var(--page-rgb) / 75%) 30%,
+      rgb(var(--page-rgb) / 92%) 48%,
+      rgb(var(--page-rgb) / 70%) 63%,
+      transparent
+    );
+}
+
+/* =====================================================
+   FLOATING ITEMS AND NEON TRAILS
+===================================================== */
+
+.zg-floating-items,
+.zg-neon-trails,
+.zg-sparks {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.zg-floating-items > span {
+  position: absolute;
+  display: block;
+  opacity: var(--emoji-opacity);
+  filter: drop-shadow(0 0 13px rgb(var(--accent-rgb) / 35%));
+  animation: zgItemFloat 12s ease-in-out infinite;
+}
+
+@keyframes zgItemFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-9deg);
+  }
+  50% {
+    transform: translate3d(12px, -20px, 0) rotate(10deg);
+  }
+}
+
+.zg-neon-trail {
+  position: absolute;
+  left: -300px;
+  width: clamp(140px, 20vw, 290px);
+  height: 1px;
+  color: var(--accent-bright);
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  filter: drop-shadow(0 0 7px currentColor);
+  animation: zgNeonTravel 17s linear infinite;
+}
+
+.zg-neon-trail.trail-1 {
+  color: var(--blue);
+}
+
+.zg-neon-trail.trail-2 {
+  color: #db64ca;
+}
+
+@keyframes zgNeonTravel {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-12deg);
+  }
+  15%,
+  75% {
+    opacity: var(--line-opacity);
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate3d(calc(100vw + 600px), -100px, 0)
+      rotate(-12deg);
+  }
+}
+
+.zg-sparks > i {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: zgSparkPulse 5s ease-in-out infinite;
+}
+
+@keyframes zgSparkPulse {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.1);
+  }
+}
+
+/* =====================================================
+   HEADER
+===================================================== */
+
+.zg-site-header {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.zg-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  width: min(1320px, calc(100% - 56px));
+  min-height: 78px;
+  margin: 0 auto;
+}
+
+.zg-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex-shrink: 0;
+}
+
+.zg-brand-logo {
+  width: 49px;
+  height: 49px;
+  border-radius: 50%;
+  background: #ffffff;
+  object-fit: contain;
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 0 17px rgb(var(--accent-rgb) / 8%);
+}
+
+.zg-brand strong {
+  display: block;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 19px;
+  line-height: 1.1;
+}
+
+.zg-brand small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.zg-desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--nav-surface);
+}
+
+.zg-nav-link {
+  padding: 12px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: color 200ms ease, background 200ms ease;
+}
+
+.zg-nav-link:hover {
+  color: var(--text);
+  background: var(--soft-surface);
+}
+
+.zg-nav-link.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #d445ed, #861deb);
+  box-shadow: 0 4px 20px rgb(160 47 236 / 30%);
+}
+
+.zg-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.zg-theme-toggle,
+.zg-mobile-toggle {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--nav-surface);
+  cursor: pointer;
+}
+
+.zg-theme-toggle:hover,
+.zg-mobile-toggle:hover {
+  background: var(--soft-surface);
+}
+
+.zg-theme-icon {
+  display: grid;
+  place-items: center;
+  animation: zgThemeIn 300ms ease both;
+}
+
+@keyframes zgThemeIn {
+  from {
+    opacity: 0;
+    transform: rotate(-40deg) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+
+.zg-offers-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--nav-surface);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.zg-mobile-toggle,
+.zg-mobile-menu,
+.zg-nav-backdrop {
+  display: none;
+}
+
+/* =====================================================
+   MOBILE MENU
+===================================================== */
+
+.zg-mobile-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  color: var(--accent);
+}
+
+.zg-mobile-menu-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+
+.zg-mobile-menu-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.zg-mobile-menu-grid a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--soft-surface);
+  font-size: 11px;
+}
+
+.zg-mobile-menu-grid a svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.zg-mobile-menu-grid a.is-current {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.zg-mobile-extra {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.zg-mobile-extra a {
+  display: flex;
+  min-height: 58px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--accent);
+  font-size: 9px;
+}
+
+/* =====================================================
+   HERO
+===================================================== */
+
+.zg-container {
+  position: relative;
+  z-index: 2;
+  width: min(1280px, calc(100% - 64px));
+  margin: 0 auto;
+  padding-top: 78px;
+}
+
+.zg-hero {
+  position: relative;
+  max-width: 850px;
+  margin: 0 auto;
+  padding: 42px 15px 40px;
+  text-align: center;
+}
+
+.zg-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--nav-surface);
+  box-shadow: 0 6px 25px rgb(var(--accent-rgb) / 5%);
+  backdrop-filter: blur(12px);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+
+.zg-hero-badge svg {
+  color: var(--accent);
+}
+
+.zg-hero-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: zgSparkPulse 3s ease-in-out infinite;
+}
+
+.zg-hero h1 {
+  margin: 19px 0 16px;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: clamp(45px, 5.5vw, 76px);
+  font-weight: 500;
+  line-height: 1.07;
+  letter-spacing: -0.045em;
+}
+
+.zg-hero h1 em {
+  color: var(--accent);
+  background: linear-gradient(100deg, #8254ed, #b834e3, #974fe6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .zg-hero h1 em {
+  background-image: linear-gradient(100deg, #a38aff, #c478ff, #b283f8);
+  filter: drop-shadow(0 0 25px rgb(174 90 255 / 12%));
+}
+
+.zg-hero > p {
+  max-width: 540px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.zg-how-it-works {
+  display: inline-flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 22px;
+  padding: 12px 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--nav-surface);
+  backdrop-filter: blur(12px);
+}
+
+.zg-how-it-works span {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.zg-how-it-works i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* =====================================================
+   GAME PANEL
+===================================================== */
+
+.zg-game-shell {
+  position: relative;
+  container-type: inline-size;
+  overflow: hidden;
+  padding: 27px 26px 23px;
+  border: 1px solid var(--border);
+  border-radius: 30px;
+  background: var(--panel);
+  box-shadow: var(--panel-shadow);
+  isolation: isolate;
+  scroll-margin-top: 95px;
+}
+
+.zg-game-shell::before {
+  position: absolute;
+  inset: 8px;
+  z-index: -1;
+  border: 1px solid rgb(var(--accent-rgb) / 10%);
+  border-radius: 23px;
+  content: "";
+  pointer-events: none;
+}
+
+.zg-game-shell::after {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background:
+    radial-gradient(
+      ellipse at 8% 60%,
+      rgb(230 79 232 / 6%),
+      transparent 40%
+    ),
+    radial-gradient(
+      ellipse at 92% 65%,
+      rgb(75 163 255 / 6%),
+      transparent 40%
+    );
+  pointer-events: none;
+}
+
+.zg-table-neon {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.zg-table-neon > span {
+  position: absolute;
+  top: 0;
+  left: -30%;
+  width: 28%;
+  height: 1px;
+  color: var(--accent);
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  box-shadow: 0 0 10px currentColor;
+  animation: zgPanelLine 9s linear infinite;
+}
+
+.zg-table-neon > span:last-child {
+  top: auto;
+  bottom: 0;
+  color: var(--blue);
+  animation-delay: -4.5s;
+  animation-direction: reverse;
+}
+
+@keyframes zgPanelLine {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(470%);
+  }
+}
+
+.zg-game-heading {
+  position: relative;
+  z-index: 20;
+  text-align: center;
+}
+
+.zg-eyebrow {
+  display: block;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  line-height: 1.5;
+}
+
+.zg-game-heading h2 {
+  min-height: 42px;
+  margin: 7px 0 8px;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: clamp(25px, 2.8vw, 34px);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.035em;
+}
+
+.zg-game-heading h2 em {
+  color: var(--accent);
+}
+
+.zg-heading-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  max-width: 180px;
+  margin: 0 auto;
+}
+
+.zg-heading-line span {
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, var(--accent));
+  opacity: 0.45;
+}
+
+.zg-heading-line span:last-child {
+  transform: rotate(180deg);
+}
+
+.zg-heading-line b {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* =====================================================
+   STAGE AND CARD POSITIONS
+===================================================== */
+
+.zg-deal-stage {
+  position: relative;
+  height: 350px;
+  height: max(330px, 29cqw);
+  width: 100%;
+  isolation: isolate;
+  transition: height 850ms var(--ease);
+}
+
+.phase-centering .zg-deal-stage,
+.phase-flipping .zg-deal-stage,
+.phase-scratch .zg-deal-stage,
+.phase-revealed .zg-deal-stage {
+  height: 510px;
+}
+
+.zg-table-glow {
+  position: absolute;
+  inset: 20% 5% 5%;
+  background:
+    radial-gradient(
+      ellipse at 50% 65%,
+      rgb(var(--accent-rgb) / 9%),
+      transparent 65%
+    );
+  pointer-events: none;
+}
+
+.zg-table-floor {
+  position: absolute;
+  right: 0;
+  bottom: 1%;
+  left: 0;
+  height: 35%;
+  opacity: 0.45;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--accent-rgb) / 6%),
+      transparent
+    );
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 8%);
+  transform: perspective(500px) rotateX(55deg);
+  pointer-events: none;
+}
+
+.zg-deal-card {
+  --card-x: 50%;
+  --card-y: 50%;
+  --card-angle: 0deg;
+
+  position: absolute;
+  top: var(--card-y);
+  left: var(--card-x);
+  z-index: 2;
+  width: 16.8%;
+  height: calc((100vw - 118px) * 0.233333);
+  height: 23.3333cqw;
+  perspective: 1600px;
+  opacity: 1;
+  transform: translate3d(-50%, -50%, 0) rotate(var(--card-angle));
+  transition:
+    left 850ms var(--ease),
+    top 850ms var(--ease),
+    width 850ms var(--ease),
+    height 850ms var(--ease),
+    transform 850ms var(--ease),
+    opacity 450ms ease;
+}
+
+.zg-position-0 {
+  --card-x: 10%;
+  --card-angle: -5deg;
+}
+
+.zg-position-1 {
+  --card-x: 30%;
+  --card-angle: -2.5deg;
+}
+
+.zg-position-2 {
+  --card-x: 50%;
+  --card-angle: 0deg;
+}
+
+.zg-position-3 {
+  --card-x: 70%;
+  --card-angle: 2.5deg;
+}
+
+.zg-position-4 {
+  --card-x: 90%;
+  --card-angle: 5deg;
+}
+
+.zg-card-ground-glow {
+  position: absolute;
+  right: -8%;
+  bottom: -22px;
+  left: -8%;
+  height: 30px;
+  border-radius: 50%;
+  background: rgb(var(--card-rgb) / 40%);
+  filter: blur(14px);
+  opacity: var(--card-glow-opacity);
+  transform: scaleY(0.7);
+  pointer-events: none;
+}
+
+.zg-deal-flipper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 1000ms cubic-bezier(0.45, 0.05, 0.15, 1);
+}
+
+.zg-deal-flipper.is-turned {
+  transform: rotateY(180deg);
+}
+
+.zg-deal-front,
+.zg-deal-back {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid var(--card-color);
+  border-radius: 13px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow:
+    0 0 0 1px rgb(var(--card-rgb) / 20%),
+    0 0 16px rgb(var(--card-rgb) / 25%),
+    0 14px 30px rgb(31 12 57 / 15%);
+}
+
+[data-theme="dark"] .zg-deal-front,
+[data-theme="dark"] .zg-deal-back {
+  box-shadow:
+    0 0 0 1px rgb(var(--card-rgb) / 30%),
+    0 0 19px rgb(var(--card-rgb) / 25%),
+    0 18px 35px rgb(0 0 0 / 40%);
+}
+
+.zg-deal-front {
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  background: var(--card-color);
+  cursor: pointer;
+  transform: rotateY(0deg);
+}
+
+.zg-deal-front:disabled {
+  opacity: 1;
+}
+
+.zg-photo {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #211431;
+}
+
+.zg-photo-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--card-color);
+  background: linear-gradient(145deg, #322046, #130c20);
+  font-size: 45px;
+}
+
+.zg-photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.001);
+  transition: transform 750ms var(--ease);
+}
+
+.zg-deal-front::after {
+  position: absolute;
+  inset: -30% -80%;
+  content: "";
+  background:
+    linear-gradient(
+      110deg,
+      transparent 43%,
+      rgb(255 255 255 / 24%) 50%,
+      transparent 57%
+    );
+  opacity: 0;
+  transform: translateX(-35%);
+  pointer-events: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .phase-choose .zg-deal-card:hover {
+    z-index: 12;
+    transform: translate3d(-50%, -54%, 0) rotate(0deg) scale(1.04);
+  }
+
+  .phase-choose .zg-deal-card:hover .zg-photo img {
+    transform: scale(1.04);
+  }
+
+  .phase-choose .zg-deal-card:hover .zg-deal-front {
+    box-shadow:
+      0 0 0 1px rgb(var(--card-rgb) / 50%),
+      0 0 30px rgb(var(--card-rgb) / 40%),
+      0 24px 45px rgb(20 9 36 / 25%);
+  }
+
+  .phase-choose .zg-deal-card:hover .zg-deal-front::after {
+    animation: zgCardSheen 850ms ease both;
+  }
+}
+
+@keyframes zgCardSheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-35%);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(35%);
+  }
+}
+
+/* =====================================================
+   INTRO, DEAL AND SELECTION
+===================================================== */
+
+.phase-intro .zg-deal-card {
+  top: 50%;
+  left: 50%;
+  width: 190px;
+  height: 264px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-50%, -50%, 0) rotate(0deg) scale(0.96);
+}
+
+.phase-intro .zg-deal-card.is-intro-card {
+  z-index: 10;
+  opacity: 1;
+}
+
+.phase-intro .is-intro-card .zg-deal-flipper {
+  animation: zgIntroFloat 900ms var(--ease) both;
+}
+
+@keyframes zgIntroFloat {
+  from {
+    opacity: 0;
+    transform: translateY(12px) rotate(-4deg) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+.phase-spread .zg-position-0 { transition-delay: 0ms; }
+.phase-spread .zg-position-1 { transition-delay: 40ms; }
+.phase-spread .zg-position-2 { transition-delay: 80ms; }
+.phase-spread .zg-position-3 { transition-delay: 120ms; }
+.phase-spread .zg-position-4 { transition-delay: 160ms; }
+
+.zg-deal-card.is-chosen {
+  top: 50%;
+  left: 50%;
+  z-index: 15;
+  width: min(340px, 94%);
+  height: 470px;
+  transform: translate3d(-50%, -50%, 0) rotate(0deg);
+  transition-delay: 0ms;
+}
+
+.zg-deal-card.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+  transform:
+    translate3d(-50%, -43%, 0)
+    rotate(var(--card-angle))
+    scale(0.88);
+  transition-delay: 0ms;
+}
+
+.zg-deal-card:focus-within {
+  z-index: 16;
+}
+
+/* =====================================================
+   CARD BACK
+===================================================== */
+
+.zg-deal-back {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px 17px;
+  background: var(--back-surface);
+  color: var(--text);
+  text-align: center;
+  transform: rotateY(180deg);
+  pointer-events: none;
+}
+
+.zg-deal-back::after {
+  position: absolute;
+  inset: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  content: "";
+  pointer-events: none;
+}
+
+.phase-scratch .is-chosen .zg-deal-back,
+.phase-revealed .is-chosen .zg-deal-back {
+  pointer-events: auto;
+}
+
+.zg-back-emblem {
+  color: var(--accent);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.zg-deal-back > .zg-eyebrow {
+  font-size: 8px;
+  letter-spacing: 0.15em;
+}
+
+.zg-deal-back > h3 {
+  margin: 0 0 3px;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.zg-back-signature {
+  color: var(--muted);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* =====================================================
+   SCRATCH SURFACE
+===================================================== */
+
+.zg-scratch-area {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.zg-ticket {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 480 / 280;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--ticket-surface);
+  isolation: isolate;
+}
+
+.zg-mystery,
+.zg-prize {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  background: var(--ticket-surface);
+}
+
+.zg-mystery {
+  gap: 8px;
+  color: var(--muted);
+}
+
+.zg-mystery svg {
+  color: var(--accent);
+}
+
+.zg-mystery strong {
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.zg-mystery > span {
+  max-width: 210px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.zg-scratch-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
+}
+
+.zg-ticket.is-revealed .zg-scratch-canvas {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.zg-prize {
+  animation: zgPrizeReveal 650ms var(--ease) both;
+}
+
+.zg-prize-emoji {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 34px;
+  line-height: 1;
+}
+
+.zg-prize .zg-eyebrow {
+  font-size: 8px;
+}
+
+.zg-prize h3 {
+  margin: 5px 0;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.zg-prize p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.zg-demo-badge {
+  margin-top: 7px;
+  padding: 4px 9px;
+  border-radius: 20px;
+  background: var(--soft-surface);
+  color: var(--accent);
+  font-size: 8px;
+}
+
+.zg-ticket.is-win .zg-prize-emoji {
+  animation: zgHappyBounce 900ms ease both;
+}
+
+.zg-ticket.is-lose .zg-prize-emoji {
+  animation: zgSadWobble 1100ms ease both;
+}
+
+@keyframes zgPrizeReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* =====================================================
+   SCRATCH PROGRESS
+===================================================== */
+
+.zg-scratch-progress {
+  margin-top: 12px;
+}
+
+.zg-progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.zg-progress-label strong {
+  color: var(--accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zg-progress-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--soft-surface);
+}
+
+.zg-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8a42dc, #cc79f4, #70b9f7);
+  transition: width 100ms linear;
+}
+
+.zg-scratch-help {
+  margin-top: 9px;
+  text-align: center;
+}
+
+.zg-scratch-help p {
+  min-height: 28px;
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.zg-scratch-help button {
+  min-height: 31px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--soft-surface);
+  color: var(--accent);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.zg-scratch-help button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.zg-scratch-help button:disabled {
+  opacity: 0.5;
+}
+
+.zg-deal-back[aria-hidden="true"] .zg-scratch-help button {
+  visibility: hidden;
+}
+
+/* =====================================================
+   RESULT
+===================================================== */
+
+.zg-stage-caption {
+  position: relative;
+  z-index: 25;
+  text-align: center;
+}
+
+.zg-stage-caption:empty {
+  display: none;
+}
+
+.zg-stage-caption > p {
+  max-width: 440px;
+  margin: 0 auto 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.zg-result-message {
+  max-width: 580px;
+  margin: 0 auto;
+  padding: 0 14px 10px;
+  animation: zgRise 550ms ease both;
+}
+
+.zg-result-reaction {
+  display: block;
+  width: fit-content;
+  margin: 0 auto 9px;
+  font-size: 42px;
+  line-height: 1.2;
+}
+
+.zg-result-message.is-win .zg-result-reaction {
+  animation: zgHappyBounce 1000ms ease both;
+}
+
+.zg-result-message.is-lose .zg-result-reaction {
+  animation: zgSadWobble 1200ms ease both;
+}
+
+.zg-result-message > strong {
+  display: block;
+  color: var(--accent);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.zg-result-message > p {
+  margin: 9px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.zg-result-note {
+  display: block;
+  margin: 7px 0 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.zg-reset {
+  display: inline-flex;
+  min-height: 43px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 5px;
+  padding: 12px 23px;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #bb3eea, #7830d8);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 25px rgb(151 48 213 / 25%);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.zg-reset:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 13px 30px rgb(151 48 213 / 35%);
+}
+
+.result-win .zg-back-emblem {
+  animation: zgHappyBounce 1000ms ease both;
+}
+
+.result-lose .zg-back-emblem {
+  animation: zgSadWobble 1100ms ease both;
+}
+
+@keyframes zgHappyBounce {
+  0% {
+    transform: scale(0.6) rotate(-12deg);
+  }
+  35% {
+    transform: translateY(-8px) scale(1.18) rotate(8deg);
+  }
+  65% {
+    transform: translateY(2px) scale(0.96) rotate(-5deg);
+  }
+  100% {
+    transform: translateY(0) scale(1) rotate(0);
+  }
+}
+
+@keyframes zgSadWobble {
+  0% {
+    opacity: 0;
+    transform: translateY(-7px);
+  }
+  20% {
+    opacity: 1;
+    transform: rotate(-10deg);
+  }
+  40% {
+    transform: rotate(8deg);
+  }
+  60% {
+    transform: rotate(-5deg);
+  }
+  80% {
+    transform: rotate(3deg);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(0);
+  }
+}
+
+@keyframes zgRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =====================================================
+   CONFETTI
+===================================================== */
+
+.zg-celebration {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.zg-celebration-glow {
+  position: absolute;
+  inset: 15%;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      ellipse,
+      rgb(var(--accent-rgb) / 20%),
+      transparent 65%
+    );
+  opacity: 0;
+  animation: zgCelebrationGlow 1600ms ease-out both;
+}
+
+.zg-confetti {
+  position: absolute;
+  top: -30px;
+  display: block;
+  opacity: 0;
+  animation-name: zgConfettiFall;
+  animation-timing-function: cubic-bezier(0.15, 0.45, 0.65, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes zgConfettiFall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -20px, 0) rotate(0);
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate3d(var(--drift), 1050px, 0)
+      rotate(var(--spin));
+  }
+}
+
+@keyframes zgCelebrationGlow {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+/* =====================================================
+   FOOTER
+===================================================== */
+
+.zg-footer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  margin-top: 26px;
+  padding: 24px 4px 32px;
+  border-top: 1px solid var(--border);
+}
+
+.zg-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+}
+
+.zg-footer-brand strong {
+  display: block;
+  color: var(--text);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 14px;
+}
+
+.zg-footer-brand small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: 0.19em;
+}
+
+.zg-footer > p {
+  margin: 0;
+  color: var(--muted);
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  text-align: center;
+}
+
+.zg-footer > a {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* =====================================================
+   TABLET
+===================================================== */
+
+@media (max-width: 1180px) {
+  .zg-topbar {
+    gap: 12px;
+  }
+
+  .zg-nav-link {
+    padding-inline: 10px;
+    font-size: 9px;
+  }
+
+  .zg-brand strong {
+    font-size: 17px;
+  }
+
+  .zg-offers-button {
+    display: none;
+  }
+
+  .zg-scene-sign {
+    display: none;
+  }
+
+  .zg-scene-monitor {
+    left: -80px;
+    opacity: 0.65;
+  }
+
+  .zg-scene-warrior {
+    right: -70px;
+    opacity: 0.7;
+  }
+}
+
+/* =====================================================
+   MOBILE NAVIGATION
+===================================================== */
+
+@media (max-width: 960px) {
+  .zg-topbar {
+    width: calc(100% - 28px);
+    min-height: 68px;
+  }
+
+  .zg-brand-logo {
+    width: 44px;
+    height: 44px;
+  }
+
+  .zg-desktop-nav {
+    display: none;
+  }
+
+  .zg-mobile-toggle {
+    display: grid;
+  }
+
+  .zg-nav-backdrop {
+    position: fixed;
+    inset: 68px 0 0;
+    z-index: 0;
+    display: block;
+    border: 0;
+    background: rgb(10 5 20 / 48%);
+    backdrop-filter: blur(4px);
+  }
+
+  .zg-mobile-menu {
+    position: absolute;
+    top: 78px;
+    right: 14px;
+    z-index: 3;
+    display: block;
+    width: min(370px, calc(100vw - 28px));
+    max-height: calc(100dvh - 100px);
+    overflow-y: auto;
+    padding: 17px;
+    border: 1px solid var(--border);
+    border-radius: 21px;
+    background: var(--glass);
+    box-shadow: 0 25px 70px rgb(20 7 35 / 25%);
+    backdrop-filter: blur(24px);
+    animation: zgRise 220ms ease both;
+  }
+
+  .zg-container {
+    width: calc(100% - 32px);
+    padding-top: 68px;
+  }
+
+  .zg-hero {
+    padding-top: 40px;
+  }
+
+  .zg-scene {
+    top: 68px;
+  }
+
+  .zg-scene-posters {
+    left: -100px;
+    opacity: 0.25;
+  }
+}
+
+/* =====================================================
+   MOBILE GAME — COMPACT 3 + 2 LAYOUT
+===================================================== */
+
+@media (max-width: 680px) {
+  .zg-page {
+    --emoji-opacity: 0.4;
+    --scene-opacity: 0.5;
+  }
+
+  .zg-page[data-theme="dark"] {
+    --emoji-opacity: 0.55;
+    --scene-opacity: 0.6;
+  }
+
+  .zg-orb {
+    width: 320px;
+    height: 320px;
+    filter: blur(45px);
+  }
+
+  .zg-grid {
+    background-size: 48px 48px;
+  }
+
+  .zg-scene {
+    height: 440px;
+  }
+
+  .zg-scene-posters,
+  .zg-scene-sign,
+  .zg-scene-floor {
+    display: none;
+  }
+
+  .zg-scene-monitor {
+    top: 130px;
+    left: -130px;
+    width: 260px;
+    opacity: 0.5;
+  }
+
+  .zg-scene-warrior {
+    top: 10px;
+    right: -125px;
+    width: 310px;
+    height: 340px;
+    opacity: 0.5;
+  }
+
+  .zg-scene-fade {
+    background:
+      linear-gradient(
+        to bottom,
+        transparent,
+        rgb(var(--page-rgb) / 45%) 55%,
+        var(--page-bg)
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        rgb(var(--page-rgb) / 80%) 30%,
+        rgb(var(--page-rgb) / 85%) 65%,
+        transparent
+      );
+  }
+
+  .zg-floating-items > span:nth-child(even),
+  .zg-neon-trail:nth-child(even),
+  .zg-sparks > i:nth-child(even) {
+    display: none;
+  }
+
+  .zg-floating-items > span {
+    margin-left: -10px;
+  }
+
+  .zg-topbar {
+    min-height: 64px;
+    width: calc(100% - 24px);
+  }
+
+  .zg-brand {
+    gap: 8px;
+  }
+
+  .zg-brand-logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .zg-brand strong {
+    font-size: 16px;
+  }
+
+  .zg-brand small {
+    font-size: 7px;
+  }
+
+  .zg-nav-actions {
+    gap: 7px;
+  }
+
+  .zg-theme-toggle,
+  .zg-mobile-toggle {
+    width: 39px;
+    height: 39px;
+  }
+
+  .zg-nav-backdrop {
+    top: 64px;
+  }
+
+  .zg-mobile-menu {
+    top: 74px;
+    right: 12px;
+    width: min(370px, calc(100vw - 24px));
+  }
+
+  .zg-container {
+    width: calc(100% - 24px);
+    padding-top: 64px;
+  }
+
+  .zg-hero {
+    padding: 32px 4px 28px;
+  }
+
+  .zg-hero-badge {
+    gap: 7px;
+    padding: 9px 12px;
+    font-size: 8px;
+    letter-spacing: 0.1em;
+  }
+
+  .zg-hero h1 {
+    margin: 17px 0 13px;
+    font-size: clamp(35px, 10.8vw, 56px);
+    line-height: 1.1;
+  }
+
+  .zg-hero > p {
+    max-width: 310px;
+    font-size: 11px;
+    line-height: 1.7;
+  }
+
+  .zg-how-it-works {
+    gap: 10px;
+    margin-top: 18px;
+    padding: 10px 15px;
+  }
+
+  .zg-how-it-works span {
+    font-size: 9px;
+  }
+
+  .zg-game-shell {
+    padding: 23px 10px 17px;
+    border-radius: 23px;
+  }
+
+  .zg-game-shell::before {
+    inset: 6px;
+    border-radius: 17px;
+  }
+
+  .zg-game-heading {
+    padding: 0 3px;
+  }
+
+  .zg-game-heading > .zg-eyebrow {
+    font-size: 7px;
+    letter-spacing: 0.18em;
+  }
+
+  .zg-game-heading h2 {
+    min-height: 33px;
+    margin: 8px 0;
+    font-size: clamp(21px, 5.7vw, 29px);
+    line-height: 1.3;
+  }
+
+  .zg-heading-line {
+    max-width: 130px;
+  }
+
+  /*
+   * 28% card width / 0.72 card ratio.
+   * Two rows with about 22px between them.
+   */
+  .zg-deal-stage {
+    height: calc((100vw - 46px) * 0.777778 + 44px);
+    height: calc(77.7778cqw + 44px);
+    margin-top: 9px;
+  }
+
+  .zg-deal-card {
+    width: 28%;
+    height: calc((100vw - 46px) * 0.388889);
+    height: 38.8889cqw;
+  }
+
+  .zg-position-0 {
+    --card-x: 17%;
+    --card-y: 25%;
+    --card-angle: -2.5deg;
+  }
+
+  .zg-position-1 {
+    --card-x: 50%;
+    --card-y: 25%;
+    --card-angle: 0deg;
+  }
+
+  .zg-position-2 {
+    --card-x: 83%;
+    --card-y: 25%;
+    --card-angle: 2.5deg;
+  }
+
+  .zg-position-3 {
+    --card-x: 33.5%;
+    --card-y: 75%;
+    --card-angle: -2deg;
+  }
+
+  .zg-position-4 {
+    --card-x: 66.5%;
+    --card-y: 75%;
+    --card-angle: 2deg;
+  }
+
+  .zg-deal-front,
+  .zg-deal-back {
+    border-radius: 11px;
+  }
+
+  .zg-deal-front {
+    padding: 1px;
+  }
+
+  .zg-photo {
+    border-radius: 7px;
+  }
+
+  .zg-card-ground-glow {
+    bottom: -14px;
+    height: 17px;
+    filter: blur(9px);
+  }
+
+  .phase-intro .zg-deal-card {
+    width: 40%;
+    height: calc((100vw - 46px) * 0.555556);
+    height: 55.5556cqw;
+  }
+
+  .phase-centering .zg-deal-stage,
+  .phase-flipping .zg-deal-stage,
+  .phase-scratch .zg-deal-stage,
+  .phase-revealed .zg-deal-stage {
+    height: 470px;
+  }
+
+  .zg-deal-card.is-chosen {
+    top: 50%;
+    left: 50%;
+    width: min(320px, 94%);
+    height: 440px;
+  }
+
+  .zg-deal-back {
+    gap: 8px;
+    padding: 16px 12px;
+  }
+
+  .zg-deal-back > h3 {
+    font-size: 23px;
+  }
+
+  .zg-back-emblem {
+    font-size: 25px;
+  }
+
+  .zg-stage-caption > p {
+    padding-inline: 7px;
+    font-size: 10px;
+  }
+
+  .zg-result-message > strong {
+    font-size: 22px;
+  }
+
+  .zg-result-message > p {
+    font-size: 11px;
+  }
+
+  .zg-result-reaction {
+    font-size: 36px;
+  }
+
+  .zg-footer {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 21px 3px 27px;
+  }
+
+  .zg-footer > p {
+    display: none;
+  }
+}
+
+/* =====================================================
+   SMALL PHONES
+===================================================== */
+
+@media (max-width: 380px) {
+  .zg-brand strong {
+    font-size: 14px;
+  }
+
+  .zg-brand-logo {
+    width: 37px;
+    height: 37px;
+  }
+
+  .zg-mobile-menu-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zg-how-it-works {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .zg-how-it-works span {
+    font-size: 8px;
+  }
+
+  .zg-prize {
+    padding: 7px;
+  }
+
+  .zg-prize-emoji {
+    margin-bottom: 4px;
+    font-size: 27px;
+  }
+
+  .zg-prize h3 {
+    margin: 4px 0;
+    font-size: 18px;
+  }
+
+  .zg-prize p {
+    font-size: 9px;
+  }
+
+  .zg-demo-badge {
+    margin-top: 5px;
+    font-size: 7px;
+  }
+
+  .zg-mystery strong {
+    font-size: 18px;
+  }
+
+  .zg-mystery > span {
+    font-size: 9px;
+  }
+
+  .zg-footer-brand strong {
+    font-size: 12px;
+  }
+
+  .zg-footer > a {
+    font-size: 9px;
+  }
+}
+
+/* =====================================================
+   REDUCED MOTION
+===================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .zg-page *,
+  .zg-page *::before,
+  .zg-page *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .zg-celebration,
+  .zg-neon-trails,
+  .zg-table-neon,
+  .zg-deal-front::after {
+    display: none;
+  }
+
+  .zg-sparks > i {
+    opacity: 0.25;
+  }
+}

@@ -1,0 +1,1693 @@
+
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+
+import type {
+  ChangeEvent,
+  FormEvent,
+} from 'react'
+
+import {
+  ArrowLeft,
+  Check,
+  Eye,
+  EyeOff,
+  Gift,
+  ImagePlus,
+  Pencil,
+  Plus,
+  Search,
+  Tag,
+  Trash2,
+  UploadCloud,
+  X,
+} from 'lucide-react'
+
+import type { AdminPage } from '../AdminApp'
+
+import {
+  readAdminOffers,
+  loadAdminOffers,
+  createAdminOffer,
+  updateAdminOffer,
+  deleteAdminOffer,
+  subscribeAdminOffers,
+  type AdminOffer,
+} from '../../data/adminOfferStore'
+
+import AdminAlert from '../utils/sweetAlert'
+
+/* ==========================================
+   TYPES
+========================================== */
+
+type Props = {
+  onNavigate: (page: AdminPage) => void
+  query?: string
+}
+
+type StatusFilter =
+  | 'all'
+  | 'active'
+  | 'inactive'
+  | 'expired'
+
+type OfferDraft = {
+  title: string
+  description: string
+  code: string
+  discountType: 'percentage' | 'fixed'
+  discountValue: string
+  startDate: string
+  endDate: string
+  active: boolean
+}
+
+const EMPTY_DRAFT: OfferDraft = {
+  title: '',
+  description: '',
+  code: '',
+  discountType: 'percentage',
+  discountValue: '',
+  startDate: '',
+  endDate: '',
+  active: true,
+}
+
+/* ==========================================
+   HELPERS
+========================================== */
+
+function getToday() {
+  const now = new Date()
+
+  const local = new Date(
+    now.getTime() -
+      now.getTimezoneOffset() * 60000
+  )
+
+  return local.toISOString().slice(0, 10)
+}
+
+function getOfferStatus(offer: AdminOffer) {
+  const today = getToday()
+
+  if (
+    offer.endDate &&
+    offer.endDate < today
+  ) {
+    return 'expired'
+  }
+
+  if (!offer.active) {
+    return 'inactive'
+  }
+
+  if (
+    offer.startDate &&
+    offer.startDate > today
+  ) {
+    return 'scheduled'
+  }
+
+  return 'active'
+}
+
+function formatDiscount(offer: AdminOffer) {
+  return offer.discountType === 'percentage'
+    ? `${offer.discountValue}% OFF`
+    : `LKR ${offer.discountValue.toLocaleString(
+        'en-LK'
+      )} OFF`
+}
+
+function formatDate(value: string) {
+  if (!value) return '—'
+
+  const date = new Date(
+    `${value}T00:00:00`
+  )
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+}
+
+function getErrorMessage(
+  error: unknown,
+  fallback: string
+) {
+  return error instanceof Error
+    ? error.message
+    : fallback
+}
+
+function getOfferDraft(
+  offer: AdminOffer
+): OfferDraft {
+  return {
+    title: offer.title,
+    description: offer.description,
+    code: offer.code,
+    discountType: offer.discountType,
+    discountValue: String(
+      offer.discountValue
+    ),
+    startDate: offer.startDate,
+    endDate: offer.endDate,
+    active: offer.active,
+  }
+}
+
+/* ==========================================
+   OFFER IMAGE PROCESSING
+========================================== */
+
+async function prepareOfferImage(
+  file: File
+): Promise<string> {
+  const allowedTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]
+
+  if (!allowedTypes.includes(file.type)) {
+    throw new Error(
+      'Please upload a JPG, PNG or WebP image.'
+    )
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error(
+      'Image must be smaller than 5 MB.'
+    )
+  }
+
+  const objectUrl =
+    URL.createObjectURL(file)
+
+  try {
+    const image =
+      await new Promise<HTMLImageElement>(
+        (resolve, reject) => {
+          const img = new Image()
+
+          img.onload = () => resolve(img)
+
+          img.onerror = () =>
+            reject(
+              new Error(
+                'Unable to load the selected image.'
+              )
+            )
+
+          img.src = objectUrl
+        }
+      )
+
+    const canvas =
+      document.createElement('canvas')
+
+    const scale = Math.min(
+      1,
+      1000 /
+        Math.max(
+          image.naturalWidth,
+          image.naturalHeight
+        )
+    )
+
+    canvas.width = Math.max(
+      1,
+      Math.round(
+        image.naturalWidth * scale
+      )
+    )
+
+    canvas.height = Math.max(
+      1,
+      Math.round(
+        image.naturalHeight * scale
+      )
+    )
+
+    const context =
+      canvas.getContext('2d')
+
+    if (!context) {
+      throw new Error(
+        'Image processing is unavailable.'
+      )
+    }
+
+    context.fillStyle = '#ffffff'
+
+    context.fillRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    )
+
+    context.drawImage(
+      image,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    )
+
+    return canvas.toDataURL(
+      'image/jpeg',
+      0.68
+    )
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+/* ==========================================
+   OFFERS PAGE
+========================================== */
+
+export default function Offers({
+  onNavigate,
+  query = '',
+}: Props) {
+  const [offers, setOffers] =
+    useState<AdminOffer[]>(
+      () => readAdminOffers()
+    )
+
+  const [filter, setFilter] =
+    useState<StatusFilter>('all')
+
+  const [search, setSearch] =
+    useState('')
+
+  const [editing, setEditing] =
+    useState<AdminOffer | null>(null)
+
+  const [formOpen, setFormOpen] =
+    useState(false)
+
+  const [draft, setDraft] =
+    useState<OfferDraft>({
+      ...EMPTY_DRAFT,
+    })
+
+  const [offerImage, setOfferImage] =
+    useState('')
+
+  const [imageError, setImageError] =
+    useState('')
+
+  const [imageLoading, setImageLoading] =
+    useState(false)
+
+  const [saving, setSaving] =
+    useState(false)
+
+  const [busyId, setBusyId] =
+    useState<string | null>(null)
+
+  const [error, setError] =
+    useState('')
+
+  const [formError, setFormError] =
+    useState('')
+
+  const fileInputRef =
+    useRef<HTMLInputElement>(null)
+
+  const imageRequestRef = useRef(0)
+
+  const formLockRef = useRef(false)
+
+  /* ==========================================
+     STORE SUBSCRIPTION
+  ========================================== */
+
+  useEffect(() => {
+    loadAdminOffers()
+      .then(items => setOffers(items))
+      .catch(() => {})
+
+    return subscribeAdminOffers(() => {
+      setOffers(readAdminOffers())
+    })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      imageRequestRef.current += 1
+    }
+  }, [])
+
+  /* ==========================================
+     STATISTICS
+  ========================================== */
+
+  const stats = useMemo(
+    () => ({
+      total: offers.length,
+
+      active: offers.filter(
+        offer =>
+          getOfferStatus(offer) ===
+          'active'
+      ).length,
+
+      scheduled: offers.filter(
+        offer =>
+          getOfferStatus(offer) ===
+          'scheduled'
+      ).length,
+
+      expired: offers.filter(
+        offer =>
+          getOfferStatus(offer) ===
+          'expired'
+      ).length,
+    }),
+    [offers]
+  )
+
+  /* ==========================================
+     FILTERED OFFERS
+  ========================================== */
+
+  const filtered = useMemo(() => {
+    const local =
+      search.trim().toLowerCase()
+
+    const global =
+      query.trim().toLowerCase()
+
+    return offers.filter(offer => {
+      const status =
+        getOfferStatus(offer)
+
+      const matchesStatus =
+        filter === 'all' ||
+        (filter === 'inactive'
+          ? status === 'inactive' ||
+            status === 'scheduled'
+          : status === filter)
+
+      const text = [
+        offer.title,
+        offer.description,
+        offer.code,
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return (
+        matchesStatus &&
+        (!local ||
+          text.includes(local)) &&
+        (!global ||
+          text.includes(global))
+      )
+    })
+  }, [offers, filter, search, query])
+
+  /* ==========================================
+     UNSAVED CHANGES
+  ========================================== */
+
+  const hasUnsavedChanges =
+    useMemo(() => {
+      if (!formOpen) return false
+
+      const originalDraft = editing
+        ? getOfferDraft(editing)
+        : EMPTY_DRAFT
+
+      const originalImage =
+        editing?.image || ''
+
+      return (
+        JSON.stringify(draft) !==
+          JSON.stringify(originalDraft) ||
+        offerImage !== originalImage
+      )
+    }, [
+      formOpen,
+      editing,
+      draft,
+      offerImage,
+    ])
+
+  /* ==========================================
+     RESET / CLOSE FORM
+  ========================================== */
+
+  function resetForm() {
+    imageRequestRef.current += 1
+
+    setFormOpen(false)
+    setEditing(null)
+    setDraft({ ...EMPTY_DRAFT })
+    setOfferImage('')
+    setImageError('')
+    setImageLoading(false)
+    setFormError('')
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  async function closeForm() {
+    if (
+      saving ||
+      formLockRef.current
+    ) {
+      return
+    }
+
+    formLockRef.current = true
+
+    try {
+      if (hasUnsavedChanges) {
+        const confirmed =
+          await AdminAlert.confirm(
+            'Discard Offer Changes?',
+            'You have unsaved promotion details. Closing this form will discard your changes.',
+            'Yes, Discard'
+          )
+
+        if (!confirmed) return
+      }
+
+      resetForm()
+    } finally {
+      formLockRef.current = false
+    }
+  }
+
+  /* ==========================================
+     OPEN CREATE FORM
+  ========================================== */
+
+  function openCreate() {
+    if (saving || busyId) return
+
+    imageRequestRef.current += 1
+
+    setEditing(null)
+    setDraft({ ...EMPTY_DRAFT })
+    setOfferImage('')
+    setImageError('')
+    setImageLoading(false)
+    setFormError('')
+    setFormOpen(true)
+  }
+
+  /* ==========================================
+     OPEN EDIT FORM
+  ========================================== */
+
+  function openEdit(offer: AdminOffer) {
+    if (saving || busyId) return
+
+    imageRequestRef.current += 1
+
+    setEditing(offer)
+    setDraft(getOfferDraft(offer))
+    setOfferImage(offer.image || '')
+    setImageError('')
+    setImageLoading(false)
+    setFormError('')
+    setFormOpen(true)
+  }
+
+  /* ==========================================
+     UPDATE FORM FIELD
+  ========================================== */
+
+  function updateDraft<
+    K extends keyof OfferDraft
+  >(
+    key: K,
+    value: OfferDraft[K]
+  ) {
+    setDraft(previous => ({
+      ...previous,
+      [key]: value,
+    }))
+
+    setFormError('')
+  }
+
+  /* ==========================================
+     UPLOAD OFFER IMAGE
+  ========================================== */
+
+  async function handleOfferImage(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file =
+      event.target.files?.[0]
+
+    if (!file || saving) return
+
+    const requestId =
+      ++imageRequestRef.current
+
+    setImageLoading(true)
+    setImageError('')
+
+    event.target.value = ''
+
+    try {
+      const preparedImage =
+        await prepareOfferImage(file)
+
+      if (
+        requestId !==
+        imageRequestRef.current
+      ) {
+        return
+      }
+
+      setOfferImage(preparedImage)
+      setFormError('')
+    } catch (caughtError) {
+      if (
+        requestId !==
+        imageRequestRef.current
+      ) {
+        return
+      }
+
+      const message = getErrorMessage(
+        caughtError,
+        'Unable to process the image.'
+      )
+
+      setImageError(message)
+
+      await AdminAlert.warning(
+        'Image Upload Failed',
+        message
+      )
+    } finally {
+      if (
+        requestId ===
+        imageRequestRef.current
+      ) {
+        setImageLoading(false)
+      }
+    }
+  }
+
+  /* ==========================================
+     REMOVE OFFER IMAGE
+  ========================================== */
+
+  async function removeOfferImage() {
+    if (
+      !offerImage ||
+      saving ||
+      imageLoading
+    ) {
+      return
+    }
+
+    const confirmed =
+      await AdminAlert.confirm(
+        'Remove Offer Image?',
+        'The promotional image will be removed from this offer when you save your changes.',
+        'Yes, Remove'
+      )
+
+    if (!confirmed) return
+
+    imageRequestRef.current += 1
+
+    setOfferImage('')
+    setImageError('')
+    setImageLoading(false)
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  /* ==========================================
+     VALIDATION ALERT
+  ========================================== */
+
+  async function showValidationError(
+    title: string,
+    message: string
+  ) {
+    setFormError(message)
+
+    await AdminAlert.warning(
+      title,
+      message
+    )
+  }
+
+  /* ==========================================
+     CREATE / UPDATE OFFER
+  ========================================== */
+
+  async function saveOffer(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault()
+
+    if (saving || formLockRef.current) {
+      return
+    }
+
+    if (imageLoading) {
+      await showValidationError(
+        'Image Processing',
+        'Please wait until the image finishes processing.'
+      )
+      return
+    }
+
+    const title = draft.title.trim()
+
+    const discountValue = Number(
+      draft.discountValue
+    )
+
+    if (!title) {
+      await showValidationError(
+        'Offer Title Required',
+        'Please enter an offer title.'
+      )
+      return
+    }
+
+    if (
+      draft.discountValue.trim() === '' ||
+      !Number.isFinite(discountValue) ||
+      discountValue <= 0 ||
+      (draft.discountType ===
+        'percentage' &&
+        discountValue > 100)
+    ) {
+      await showValidationError(
+        'Invalid Discount',
+        draft.discountType ===
+          'percentage'
+          ? 'Please enter a percentage between 0 and 100.'
+          : 'Please enter a valid discount amount in LKR.'
+      )
+      return
+    }
+
+    if (
+      draft.startDate &&
+      draft.endDate &&
+      draft.endDate < draft.startDate
+    ) {
+      await showValidationError(
+        'Invalid Offer Dates',
+        'End date cannot be before the start date.'
+      )
+      return
+    }
+
+    const isEditing = Boolean(editing)
+
+    const offer: AdminOffer = {
+      id:
+        editing?.id ||
+        crypto.randomUUID(),
+
+      title,
+
+      description:
+        draft.description.trim(),
+
+      code:
+        draft.code.trim().toUpperCase(),
+
+      discountType:
+        draft.discountType,
+
+      discountValue,
+
+      startDate:
+        draft.startDate,
+
+      endDate:
+        draft.endDate,
+
+      active:
+        draft.active,
+
+      createdAt:
+        editing?.createdAt ||
+        new Date().toISOString(),
+
+      image:
+        offerImage,
+    }
+
+    formLockRef.current = true
+    setSaving(true)
+    setFormError('')
+
+    try {
+      if (isEditing && editing) {
+        await updateAdminOffer(editing.id, {
+          title,
+          description: draft.description.trim(),
+          code: draft.code.trim().toUpperCase(),
+          discountType: draft.discountType,
+          discountValue,
+          startDate: draft.startDate,
+          endDate: draft.endDate,
+          active: draft.active,
+          image: offerImage,
+        })
+      } else {
+        await createAdminOffer({
+          title,
+          description: draft.description.trim(),
+          code: draft.code.trim().toUpperCase(),
+          discountType: draft.discountType,
+          discountValue,
+          startDate: draft.startDate,
+          endDate: draft.endDate,
+          active: draft.active,
+          image: offerImage,
+        })
+      }
+
+      resetForm()
+      setError('')
+
+      if (isEditing) {
+        await AdminAlert.offerUpdated()
+      } else {
+        await AdminAlert.offerAdded()
+      }
+    } catch (caughtError) {
+      const message = getErrorMessage(
+        caughtError,
+        'Unable to save the offer.'
+      )
+
+      setFormError(message)
+
+      await AdminAlert.error(
+        isEditing
+          ? 'Offer Update Failed'
+          : 'Offer Creation Failed',
+        message
+      )
+    } finally {
+      setSaving(false)
+      formLockRef.current = false
+    }
+  }
+
+  /* ==========================================
+     ENABLE / DISABLE OFFER
+  ========================================== */
+
+  async function toggleOffer(
+    offer: AdminOffer
+  ) {
+    if (busyId || saving) return
+
+    const nextActive =
+      !offer.active
+
+    const confirmed =
+      await AdminAlert.confirm(
+        nextActive
+          ? 'Enable Promotion?'
+          : 'Disable Promotion?',
+        nextActive
+          ? `"${offer.title}" will be enabled. Its dates will still determine when it runs.`
+          : `"${offer.title}" will be disabled and no longer be active.`,
+        nextActive
+          ? 'Yes, Enable'
+          : 'Yes, Disable'
+      )
+
+    if (!confirmed) return
+
+    setBusyId(offer.id)
+    setError('')
+
+    try {
+      await updateAdminOffer(offer.id, {
+        active: nextActive,
+      })
+
+      await AdminAlert.success(
+        nextActive
+          ? 'Promotion Enabled!'
+          : 'Promotion Disabled!',
+        `"${offer.title}" has been updated successfully.`
+      )
+    } catch (caughtError) {
+      const message = getErrorMessage(
+        caughtError,
+        'Unable to change offer status.'
+      )
+
+      setError(message)
+
+      await AdminAlert.error(
+        'Status Update Failed',
+        message
+      )
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /* ==========================================
+     DELETE OFFER
+  ========================================== */
+
+  async function deleteOffer(
+    offer: AdminOffer
+  ) {
+    if (busyId || saving) return
+
+    const confirmed =
+      await AdminAlert.confirmDelete(
+        `"${offer.title}"`
+      )
+
+    if (!confirmed) return
+
+    setBusyId(offer.id)
+    setError('')
+
+    try {
+      await deleteAdminOffer(offer.id)
+
+      await AdminAlert.offerDeleted()
+    } catch (caughtError) {
+      const message = getErrorMessage(
+        caughtError,
+        'Unable to delete the offer.'
+      )
+
+      setError(message)
+
+      await AdminAlert.error(
+        'Delete Failed',
+        message
+      )
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /* ==========================================
+     PAGE UI
+  ========================================== */
+
+  return (
+    <div className="za-offers-page">
+
+      {/* BREADCRUMB */}
+
+      <div className="za-products-breadcrumb">
+
+        <button
+          type="button"
+          onClick={() =>
+            onNavigate('dashboard')
+          }
+        >
+          Dashboard
+        </button>
+
+        <span>/</span>
+
+        <strong>
+          Offers & Promotions
+        </strong>
+
+      </div>
+
+      {/* PAGE HEADER */}
+
+      <div className="za-products-page-head">
+
+        <div>
+          <p className="za-kicker">
+            PROMOTION MANAGEMENT
+          </p>
+
+          <h1>
+            Offers & Promotions
+          </h1>
+
+          <p>
+            Create special offers and
+            manage your café promotions.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="za-primary"
+          disabled={
+            saving || busyId !== null
+          }
+          onClick={openCreate}
+        >
+          <Plus size={18} />
+          Create New Offer
+        </button>
+
+      </div>
+
+      {/* SUMMARY CARDS */}
+
+      <div className="za-product-summary">
+
+        <div className="za-product-summary-card">
+          <span>Total Offers</span>
+          <strong>{stats.total}</strong>
+          <small>All promotions</small>
+        </div>
+
+        <div className="za-product-summary-card">
+          <span>Active Offers</span>
+          <strong>{stats.active}</strong>
+          <small>Currently running</small>
+        </div>
+
+        <div className="za-product-summary-card">
+          <span>Scheduled</span>
+          <strong>{stats.scheduled}</strong>
+          <small>Upcoming promotions</small>
+        </div>
+
+        <div className="za-product-summary-card">
+          <span>Expired</span>
+          <strong>{stats.expired}</strong>
+          <small>Past promotions</small>
+        </div>
+
+      </div>
+
+      {/* ERROR */}
+
+      {error && (
+        <p
+          className="za-add-feedback za-add-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+
+      {/* PROMOTIONS TABLE */}
+
+      <section className="za-product-management-card">
+
+        <div className="za-product-management-top">
+
+          <div>
+            <h2>
+              <Gift size={24} />
+              All Promotions
+            </h2>
+
+            <p>
+              Manage discount codes,
+              availability and offer dates.
+            </p>
+          </div>
+
+          <span className="za-products-count">
+            {filtered.length} offers
+          </span>
+
+        </div>
+
+        {/* FILTERS */}
+
+        <div className="za-product-management-filters">
+
+          <div className="za-filter-pills">
+
+            {([
+              ['all', 'All Offers'],
+              ['active', 'Active'],
+              [
+                'inactive',
+                'Inactive / Upcoming',
+              ],
+              ['expired', 'Expired'],
+            ] as const).map(
+              ([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    filter === value
+                      ? 'active'
+                      : ''
+                  }
+                  onClick={() =>
+                    setFilter(value)
+                  }
+                  aria-pressed={
+                    filter === value
+                  }
+                >
+                  {label}
+                </button>
+              )
+            )}
+
+          </div>
+
+          <label className="za-product-search za-management-search">
+
+            <Search size={17} />
+
+            <input
+              type="search"
+              placeholder="Search offers..."
+              value={search}
+              onChange={event =>
+                setSearch(event.target.value)
+              }
+            />
+
+          </label>
+
+        </div>
+
+        {/* TABLE */}
+
+        <div className="za-table-wrap">
+
+          <table className="za-table za-management-table">
+
+            <thead>
+              <tr>
+                <th>Promotion</th>
+                <th>Discount</th>
+                <th>Promo Code</th>
+                <th>Validity</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              {filtered.map(offer => {
+                const status =
+                  getOfferStatus(offer)
+
+                return (
+                  <tr key={offer.id}>
+
+                    {/* PROMOTION */}
+
+                    <td>
+                      <div className="za-management-product">
+
+                        <div className="za-offer-table-icon">
+
+                          {offer.image ? (
+                            <img
+                              src={offer.image}
+                              alt={offer.title}
+                              className="za-offer-table-image"
+                            />
+                          ) : (
+                            <Tag size={21} />
+                          )}
+
+                        </div>
+
+                        <div>
+                          <strong>
+                            {offer.title}
+                          </strong>
+
+                          <small>
+                            {offer.description ||
+                              'No description'}
+                          </small>
+                        </div>
+
+                      </div>
+                    </td>
+
+                    {/* DISCOUNT */}
+
+                    <td className="za-management-price">
+                      {formatDiscount(offer)}
+                    </td>
+
+                    {/* PROMO CODE */}
+
+                    <td>
+                      <span className="za-offer-code">
+                        {offer.code ||
+                          'No code'}
+                      </span>
+                    </td>
+
+                    {/* DATES */}
+
+                    <td>
+                      <div className="za-offer-dates">
+
+                        <span>
+                          {formatDate(
+                            offer.startDate
+                          )}
+                        </span>
+
+                        <small>
+                          to{' '}
+                          {formatDate(
+                            offer.endDate
+                          )}
+                        </small>
+
+                      </div>
+                    </td>
+
+                    {/* STATUS */}
+
+                    <td>
+                      <button
+                        type="button"
+                        className={`za-availability-toggle ${
+                          status === 'active'
+                            ? 'is-active'
+                            : ''
+                        }`}
+                        disabled={
+                          busyId !== null ||
+                          saving
+                        }
+                        onClick={() => {
+                          void toggleOffer(offer)
+                        }}
+                        title="Enable or disable promotion"
+                      >
+                        {offer.active ? (
+                          <Eye size={15} />
+                        ) : (
+                          <EyeOff size={15} />
+                        )}
+
+                        {status
+                          .charAt(0)
+                          .toUpperCase() +
+                          status.slice(1)}
+                      </button>
+                    </td>
+
+                    {/* ACTIONS */}
+
+                    <td>
+                      <div className="za-table-actions">
+
+                        <button
+                          type="button"
+                          className="za-row-action"
+                          title={`Edit ${offer.title}`}
+                          aria-label={`Edit ${offer.title}`}
+                          disabled={
+                            busyId !== null ||
+                            saving
+                          }
+                          onClick={() =>
+                            openEdit(offer)
+                          }
+                        >
+                          <Pencil size={16} />
+                        </button>
+
+                        <button
+                          type="button"
+                          className="za-row-action za-delete"
+                          title={`Delete ${offer.title}`}
+                          aria-label={`Delete ${offer.title}`}
+                          disabled={
+                            busyId !== null ||
+                            saving
+                          }
+                          onClick={() => {
+                            void deleteOffer(offer)
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+
+                      </div>
+                    </td>
+
+                  </tr>
+                )
+              })}
+
+            </tbody>
+          </table>
+
+          {/* EMPTY STATE */}
+
+          {filtered.length === 0 && (
+            <div className="za-management-empty">
+
+              <Gift size={32} />
+
+              <h3>
+                No promotions found
+              </h3>
+
+              <p>
+                Create your first offer
+                or adjust the filters.
+              </p>
+
+            </div>
+          )}
+
+        </div>
+
+      </section>
+
+      {/* CREATE / EDIT MODAL */}
+
+      {formOpen && (
+        <div
+          className="za-edit-overlay"
+          role="presentation"
+          onMouseDown={event => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              void closeForm()
+            }
+          }}
+        >
+          <div
+            className="za-edit-dialog za-offer-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="za-offer-dialog-title"
+          >
+
+            {/* MODAL HEADER */}
+
+            <div className="za-edit-dialog-head">
+
+              <div>
+                <p className="za-kicker">
+                  PROMOTION MANAGEMENT
+                </p>
+
+                <h2 id="za-offer-dialog-title">
+                  {editing
+                    ? 'Edit Promotion'
+                    : 'Create New Offer'}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="za-icon-button"
+                disabled={saving}
+                onClick={() => {
+                  void closeForm()
+                }}
+                aria-label="Close offer form"
+              >
+                <X size={22} />
+              </button>
+
+            </div>
+
+            {/* FORM */}
+
+            <form
+              onSubmit={saveOffer}
+              noValidate
+            >
+
+              {/* TITLE */}
+
+              <label>
+                Offer Title *
+
+                <input
+                  required
+                  maxLength={100}
+                  placeholder="e.g. Weekend Special"
+                  value={draft.title}
+                  disabled={saving}
+                  onChange={event =>
+                    updateDraft(
+                      'title',
+                      event.target.value
+                    )
+                  }
+                />
+              </label>
+
+              {/* DESCRIPTION */}
+
+              <label>
+                Description
+
+                <textarea
+                  rows={3}
+                  placeholder="Describe this promotion..."
+                  value={draft.description}
+                  disabled={saving}
+                  onChange={event =>
+                    updateDraft(
+                      'description',
+                      event.target.value
+                    )
+                  }
+                />
+              </label>
+
+              {/* IMAGE UPLOAD */}
+
+              <div className="za-offer-image-section">
+
+                <label className="za-offer-image-label">
+                  Offer Image /
+                  Promotional Banner
+                </label>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  hidden
+                  disabled={
+                    imageLoading || saving
+                  }
+                  onChange={handleOfferImage}
+                />
+
+                <button
+                  type="button"
+                  className="za-offer-image-upload"
+                  disabled={
+                    imageLoading || saving
+                  }
+                  onClick={() =>
+                    fileInputRef.current?.click()
+                  }
+                >
+                  {offerImage ? (
+                    <img
+                      src={offerImage}
+                      alt="Offer preview"
+                    />
+                  ) : (
+                    <>
+                      <UploadCloud size={32} />
+
+                      <strong>
+                        {imageLoading
+                          ? 'Processing Image...'
+                          : 'Browse Image'}
+                      </strong>
+
+                      <small>
+                        JPG, PNG or WEBP ·
+                        Max 5 MB
+                      </small>
+                    </>
+                  )}
+                </button>
+
+                {offerImage && (
+                  <div className="za-offer-image-actions">
+
+                    <button
+                      type="button"
+                      disabled={
+                        imageLoading || saving
+                      }
+                      onClick={() =>
+                        fileInputRef.current?.click()
+                      }
+                    >
+                      <ImagePlus size={15} />
+                      Change Image
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={
+                        imageLoading || saving
+                      }
+                      onClick={() => {
+                        void removeOfferImage()
+                      }}
+                    >
+                      <X size={15} />
+                      Remove Image
+                    </button>
+
+                  </div>
+                )}
+
+                {imageError && (
+                  <p
+                    className="za-add-feedback za-add-error"
+                    role="alert"
+                  >
+                    {imageError}
+                  </p>
+                )}
+
+              </div>
+
+              {/* DISCOUNT */}
+
+              <div className="za-offer-form-grid">
+
+                <label>
+                  Discount Type
+
+                  <select
+                    value={draft.discountType}
+                    disabled={saving}
+                    onChange={event =>
+                      updateDraft(
+                        'discountType',
+                        event.target.value as
+                          | 'percentage'
+                          | 'fixed'
+                      )
+                    }
+                  >
+                    <option value="percentage">
+                      Percentage (%)
+                    </option>
+
+                    <option value="fixed">
+                      Fixed Amount (LKR)
+                    </option>
+                  </select>
+                </label>
+
+                <label>
+                  Discount Value *
+
+                  <input
+                    type="number"
+                    required
+                    min="0.01"
+                    max={
+                      draft.discountType ===
+                      'percentage'
+                        ? 100
+                        : undefined
+                    }
+                    step="0.01"
+                    placeholder={
+                      draft.discountType ===
+                      'percentage'
+                        ? 'e.g. 15'
+                        : 'e.g. 500'
+                    }
+                    value={
+                      draft.discountValue
+                    }
+                    disabled={saving}
+                    onChange={event =>
+                      updateDraft(
+                        'discountValue',
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+
+              </div>
+
+              {/* PROMO CODE */}
+
+              <label>
+                Promo Code (optional)
+
+                <input
+                  maxLength={30}
+                  placeholder="e.g. ZEN15"
+                  value={draft.code}
+                  disabled={saving}
+                  onChange={event =>
+                    updateDraft(
+                      'code',
+                      event.target.value
+                    )
+                  }
+                />
+              </label>
+
+              {/* DATES */}
+
+              <div className="za-offer-form-grid">
+
+                <label>
+                  Start Date
+
+                  <input
+                    type="date"
+                    value={draft.startDate}
+                    disabled={saving}
+                    onChange={event =>
+                      updateDraft(
+                        'startDate',
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+
+                <label>
+                  End Date
+
+                  <input
+                    type="date"
+                    min={
+                      draft.startDate ||
+                      undefined
+                    }
+                    value={draft.endDate}
+                    disabled={saving}
+                    onChange={event =>
+                      updateDraft(
+                        'endDate',
+                        event.target.value
+                      )
+                    }
+                  />
+                </label>
+
+              </div>
+
+              {/* ACTIVE SWITCH */}
+
+              <label className="za-edit-checkbox">
+
+                <input
+                  type="checkbox"
+                  checked={draft.active}
+                  disabled={saving}
+                  onChange={event =>
+                    updateDraft(
+                      'active',
+                      event.target.checked
+                    )
+                  }
+                />
+
+                Enable Promotion
+              </label>
+
+              {/* FORM ERROR */}
+
+              {formError && (
+                <p
+                  className="za-add-feedback za-add-error"
+                  role="alert"
+                >
+                  {formError}
+                </p>
+              )}
+
+              {/* FORM ACTIONS */}
+
+              <div className="za-edit-dialog-actions">
+
+                <button
+                  type="button"
+                  className="za-edit-cancel"
+                  disabled={saving}
+                  onClick={() => {
+                    void closeForm()
+                  }}
+                >
+                  <ArrowLeft size={16} />
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="za-primary"
+                  disabled={
+                    imageLoading || saving
+                  }
+                >
+                  <Check size={17} />
+
+                  {saving
+                    ? 'Saving...'
+                    : editing
+                      ? 'Save Changes'
+                      : 'Create Offer'}
+                </button>
+
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  )
+}

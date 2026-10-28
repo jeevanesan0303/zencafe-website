@@ -1,0 +1,35 @@
+{
+  "name": "zen-cafe-premium-v150-audited",
+  "private": true,
+  "version": "150.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4174",
+    "dev:vite": "vite --host 0.0.0.0 --port 5174",
+    "db:migrate": "node server/migrate.mjs",
+    "test": "node test/products-api.test.mjs && node test/offers-api.test.mjs && node test/bookings-api.test.mjs && node test/auth-registration.test.mjs && node test/gallery-api.test.mjs && node test/games-settings-api.test.mjs && node test/phase7-safety-auth.test.mjs && node test/http-server.test.mjs && node --experimental-strip-types test/worker-integration.test.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "lucide-react": "^0.468.0",
+    "pg": "^8.23.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sweetalert2": "^11.26.25"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "pg-mem": "^3.0.14",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "wrangler": "^4.153.0"
+  }
+}

@@ -1,0 +1,20 @@
+ZEN CAFE V92 — EXACT FONT SETUP
+
+Exact font identified from the supplied font ZIP / screen recording:
+THE LAST SHURIKEN — Regular
+
+To see the exact face in Chrome/Edge on localhost:
+1. Open your original font ZIP.
+2. Install either "The Last Shuriken.otf" or "The Last Shuriken.ttf" in Windows.
+3. Close every Chrome/Edge window.
+4. Re-open the browser and run the website.
+5. Press Ctrl+F5 once.
+
+The website is configured to request these exact installed family names:
+- The Last Shuriken
+- The Last Shuriken Regular
+- TheLastShuriken-Regular
+
+No other design, panda, gallery, booking, offer or timing behavior is changed.
+
+License note: the supplied font Readme says the font is personal-use only unless a commercial/promotional license is purchased from the font author.

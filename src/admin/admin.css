@@ -1,0 +1,3758 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500&family=Caveat:wght@400;500;600&family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+@import url('https://fonts.googleapis.com/css2?family=Allura&family=DM+Sans:wght@400;500;600;700&family=Great+Vibes&family=Italianno&family=Playfair+Display:wght@400;500;600&display=swap');
+
+/* ========================================
+   ZEN CAFÉ ADMIN — DESIGN SYSTEM
+======================================== */
+
+.za-shell {
+  --za-red: #9d211b;
+  --za-dark: #681910;
+  --za-cream: #faf3ed;
+  --za-text: #211915;
+  --za-muted: #786c65;
+
+  display: flex;
+  min-height: 100vh;
+  background: #faf3ed;
+  color: var(--za-text);
+  font-family: 'DM Sans', Arial, sans-serif;
+}
+
+.za-shell *,
+.za-shell *::before,
+.za-shell *::after {
+  box-sizing: border-box;
+}
+
+.za-shell button,
+.za-shell input {
+  font-family: 'DM Sans', Arial, sans-serif;
+}
+
+.za-shell button {
+  cursor: pointer;
+}
+
+/* ========================================
+   SIDEBAR
+======================================== */
+
+.za-sidebar {
+  position: fixed;
+  z-index: 30;
+  inset: 0 auto 0 0;
+
+  display: flex;
+  flex-direction: column;
+
+  width: 244px;
+  height: 100vh;
+  padding: 23px 15px 0;
+
+  color: #fff;
+
+  background: linear-gradient(
+    165deg,
+    #751b14 0%,
+    #841e16 46%,
+    #651710 100%
+  );
+
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.za-sidebar::-webkit-scrollbar {
+  display: none;
+}
+
+.za-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+
+  gap: 3px;
+  margin-bottom: 25px;
+}
+
+.za-brand-logo {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 9px;
+}
+
+.za-brand img {
+  display: block;
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.za-brand strong {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  margin: 0;
+}
+
+.za-brand > span {
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 2.2px;
+  margin-top: 5px;
+}
+
+.za-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.za-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+
+  width: 100%;
+  min-height: 47px;
+  padding: 11px 17px;
+
+  border: none;
+  border-radius: 9px;
+
+  background: transparent;
+  color: #fff;
+
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+
+  transition: background 0.2s ease;
+}
+
+.za-nav-link svg {
+  flex-shrink: 0;
+}
+
+.za-nav-link:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.za-nav-link.active {
+  background: #fffaf7;
+  color: #9d211b;
+  font-weight: 700;
+}
+
+.za-sidebar-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  margin-top: 75px;
+  padding-top: 21px;
+
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* Botanical footer */
+
+.za-sidebar-bottom {
+  position: relative;
+  flex-shrink: 0;
+  height: 205px;
+  margin-top: auto;
+  overflow: hidden;
+}
+
+.za-leaf-art {
+  position: absolute;
+  bottom: -23px;
+  left: -27px;
+
+  width: 175px;
+  height: 245px;
+
+  pointer-events: none;
+}
+
+.za-sidebar-quote {
+  position: absolute;
+  right: 2px;
+  bottom: 17px;
+  z-index: 1;
+
+  margin: 0;
+  padding: 0;
+
+  font-family: 'Caveat', cursive;
+  font-size: 25px;
+  font-weight: 400;
+  line-height: 0.98;
+
+  color: #edb69e;
+  text-align: center;
+  white-space: nowrap;
+
+  transform: rotate(-9deg);
+}
+
+.za-sidebar-quote span {
+  display: block;
+  margin-top: 2px;
+}
+
+.za-sidebar-quote b {
+  font-family: Georgia, serif;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.za-close {
+  display: none;
+}
+
+.za-backdrop {
+  display: none;
+}
+
+/* ========================================
+   MAIN AREA
+======================================== */
+
+.za-main {
+  margin-left: 244px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ========================================
+   HEADER
+======================================== */
+
+.za-header {
+  height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+
+  padding: 0 34px;
+  background: #fffdfa;
+
+  border-bottom: 1px solid #f1e8e1;
+}
+
+.za-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: #7b251d;
+}
+
+.za-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  width: 100%;
+  max-width: 500px;
+  flex: 1;
+
+  padding: 12px 20px;
+  border-radius: 40px;
+
+  background: #f7eee8;
+  color: #63483d;
+}
+
+.za-search input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+
+  background: transparent;
+  color: #382b26;
+  font-size: 13px;
+}
+
+.za-search input::placeholder {
+  color: #92857e;
+}
+
+.za-header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.za-notification {
+  position: relative;
+  color: #6f291f;
+}
+
+.za-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 50%;
+  background: #ead0c1;
+  color: #792019;
+
+  font-weight: 700;
+}
+
+.za-user {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.za-user strong {
+  font-size: 14px;
+}
+
+.za-user small {
+  font-size: 11px;
+  color: #81756f;
+}
+
+/* ========================================
+   DASHBOARD CONTENT
+======================================== */
+
+.za-content {
+  padding: 0 23px 36px;
+}
+
+.za-dashboard {
+  width: 100%;
+}
+
+/* ========================================
+   HERO BANNER
+======================================== */
+
+.za-hero {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 190px;
+  padding: 25px 42px 35px;
+
+  overflow: hidden;
+
+  background-color: #faeee5;
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(252, 246, 240, 0.99) 0%,
+      rgba(252, 246, 240, 0.97) 36%,
+      rgba(252, 246, 240, 0.66) 56%,
+      rgba(252, 246, 240, 0.03) 75%
+    ),
+    url('/assets/zen-admin-hero.png');
+
+  background-position: center, right center;
+  background-size: cover, cover;
+  background-repeat: no-repeat;
+}
+
+.za-hero-copy {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.za-kicker {
+  margin: 0 0 7px;
+
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #9c1d18;
+}
+
+.za-hero .za-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+
+  margin: 0 0 7px;
+
+  font-family: 'Bodoni Moda', 'Times New Roman', serif;
+  font-size: clamp(37px, 3.55vw, 60px);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -2.5px;
+
+  color: #100e0c;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.za-hero-sparkles {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+
+  color: #c87531;
+  font-family: Georgia, serif;
+  line-height: 0.65;
+  letter-spacing: 0;
+}
+
+.za-hero-sparkles span:first-child {
+  font-size: 31px;
+}
+
+.za-hero-sparkles span:last-child {
+  font-size: 17px;
+  margin-left: 22px;
+}
+
+.za-hero .za-hero-description {
+  margin: 0;
+
+  font-family: 'DM Sans', sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.55;
+
+  color: #62564e;
+}
+
+.za-hero-art {
+  position: absolute;
+  z-index: 2;
+
+  left: 45%;
+  top: 50%;
+  transform: translateY(-50%);
+
+  pointer-events: none;
+}
+
+.za-hero-handwriting {
+  display: flex;
+  flex-direction: column;
+
+  font-family: 'Caveat', cursive;
+  font-size: 35px;
+  font-weight: 400;
+  line-height: 0.95;
+
+  color: #a34c2e;
+  white-space: nowrap;
+
+  transform: rotate(-10deg);
+}
+
+.za-hero-handwriting span {
+  display: block;
+}
+
+.za-hero-handwriting b {
+  font-family: Georgia, serif;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+/* ========================================
+   STAT CARDS
+======================================== */
+
+.za-stats {
+  position: relative;
+  z-index: 3;
+
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+
+  margin: -8px 0 17px;
+}
+
+.za-stat {
+  display: flex;
+  align-items: center;
+  gap: 19px;
+
+  min-width: 0;
+  min-height: 115px;
+  padding: 20px 22px;
+
+  border: 1px solid rgba(240, 226, 216, 0.8);
+  border-radius: 17px;
+
+  color: #241a16;
+  text-align: left;
+
+  box-shadow: 0 7px 22px rgba(79, 36, 17, 0.035);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.za-stat:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 9px 25px rgba(79, 36, 17, 0.08);
+}
+
+.za-stat-rose {
+  background: #fff0ef;
+}
+
+.za-stat-amber {
+  background: #fff9ef;
+}
+
+.za-stat-green {
+  background: #f0faf0;
+}
+
+.za-stat-icon {
+  color: #b52a21;
+}
+
+.za-stat-amber .za-stat-icon {
+  color: #d57912;
+}
+
+.za-stat-green .za-stat-icon {
+  color: #15823b;
+}
+
+.za-stat-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.za-stat-copy small {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+
+.za-stat-copy strong {
+  font-family: 'Bodoni Moda', Georgia, serif;
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.za-stat-copy span {
+  font-size: 12px;
+  color: #85766e;
+}
+
+.za-stat-arrow {
+  display: grid;
+  place-items: center;
+
+  width: 35px;
+  height: 35px;
+  flex-shrink: 0;
+
+  margin-left: auto;
+  border-radius: 50%;
+
+  background: #fde3e0;
+  color: #b52a21;
+  font-size: 25px;
+}
+
+.za-stat-amber .za-stat-arrow {
+  background: #fff0d7;
+  color: #d57912;
+}
+
+.za-stat-green .za-stat-arrow {
+  background: #e0f5e2;
+  color: #15823b;
+}
+
+/* ========================================
+   THREE DASHBOARD PANELS
+======================================== */
+
+.za-panels {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.35fr)
+    minmax(0, 1fr)
+    minmax(0, 1fr);
+
+  gap: 14px;
+  align-items: stretch;
+}
+
+.za-panel {
+  min-width: 0;
+  padding: 17px;
+
+  border: 1px solid #f0e6df;
+  border-radius: 17px;
+
+  background: #fffdfa;
+  box-shadow: 0 6px 22px rgba(77, 33, 12, 0.035);
+}
+
+.za-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+
+  margin-bottom: 18px;
+}
+
+.za-panel-heading {
+  min-width: 0;
+}
+
+.za-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  margin: 0;
+
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.4px;
+
+  color: #1d1714;
+  text-transform: none;
+}
+
+.za-panel h2 svg {
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  color: #a3211c;
+}
+
+.za-panel-head p {
+  margin: 7px 0 0;
+
+  font-size: 11px;
+  line-height: 1.45;
+  color: #887a71;
+}
+
+.za-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 10px 14px;
+
+  border: none;
+  border-radius: 12px;
+
+  background: #a51f1a;
+  color: #fff;
+
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+
+  transition: background 0.2s ease;
+}
+
+.za-primary:hover {
+  background: #7f1713;
+}
+
+/* ========================================
+   PRODUCT FILTERS
+======================================== */
+
+.za-product-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  margin-bottom: 16px;
+}
+
+.za-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.za-filter-pills button {
+  min-height: 34px;
+  padding: 7px 15px;
+
+  border: 1px solid #eee1d8;
+  border-radius: 22px;
+
+  background: #fffdfa;
+  color: #44342c;
+
+  font-size: 11px;
+}
+
+.za-filter-pills button.active {
+  border-color: #a31f1a;
+  background: #a31f1a;
+  color: #fff;
+}
+
+.za-product-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  min-width: 0;
+  width: 45%;
+  padding: 9px 13px;
+
+  border: 1px solid #efe4dd;
+  border-radius: 24px;
+
+  color: #76665c;
+  background: #fffdfa;
+}
+
+.za-product-search input {
+  width: 100%;
+  min-width: 0;
+
+  border: none;
+  outline: none;
+
+  background: transparent;
+  font-size: 11px;
+}
+
+.za-product-search input::placeholder {
+  color: #9b8f87;
+}
+
+/* ========================================
+   TABLES
+======================================== */
+
+.za-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.za-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  font-family: 'DM Sans', Arial, sans-serif;
+  font-size: 11px;
+  text-align: left;
+}
+
+.za-table thead {
+  background: #f8f0e9;
+}
+
+.za-table th {
+  padding: 12px 8px;
+
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.za-table td {
+  padding: 10px 7px;
+
+  border-bottom: 1px solid #f3eae3;
+  vertical-align: middle;
+}
+
+.za-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.za-table td strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.za-table td small {
+  display: block;
+
+  max-width: 145px;
+  margin-top: 5px;
+
+  color: #91837b;
+  font-size: 10px;
+  line-height: 1.3;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.za-thumb {
+  display: block;
+
+  width: 54px;
+  height: 51px;
+
+  object-fit: cover;
+  border-radius: 9px;
+}
+
+.za-price {
+  white-space: nowrap;
+}
+
+.za-table-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.za-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 32px;
+
+  border: 1px solid #efe1d7;
+  border-radius: 50%;
+
+  background: #fff;
+  color: #76271f;
+}
+
+.za-row-action:hover {
+  background: #fff1eb;
+}
+
+.za-delete {
+  color: #b32720;
+}
+
+.za-view-booking {
+  background: #f9f3ee;
+  border-color: transparent;
+  color: #42342e;
+}
+
+/* ========================================
+   STATUS PILLS
+======================================== */
+
+.za-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 6px 10px;
+  border-radius: 20px;
+
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.za-pill-green {
+  background: #dcf4df;
+  color: #176a2d;
+}
+
+.za-pill-amber {
+  background: #fff0d4;
+  color: #a45b09;
+}
+
+.za-pill-gray {
+  background: #eeecea;
+  color: #655a54;
+}
+
+/* ========================================
+   OFFERS
+======================================== */
+
+.za-offer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.za-offer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  min-width: 0;
+  padding: 10px 0;
+
+  border-bottom: 1px solid #f2eae3;
+}
+
+.za-offer:first-child {
+  padding-top: 0;
+}
+
+.za-offer:last-child {
+  border-bottom: none;
+}
+
+.za-offer img {
+  display: block;
+
+  width: 65px;
+  height: 61px;
+  flex-shrink: 0;
+
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.za-offer-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.za-offer-details strong {
+  display: block;
+
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.za-offer-details small {
+  display: block;
+
+  margin-top: 5px;
+
+  color: #8f8179;
+  font-size: 10px;
+  line-height: 1.3;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.za-offer-details .za-offer-date {
+  font-size: 9px;
+}
+
+.za-offer-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  padding: 4px;
+  border: none;
+
+  background: transparent;
+  color: #4c3730;
+}
+
+/* ========================================
+   BOOKINGS
+======================================== */
+
+.za-bookings-table td {
+  padding-top: 13px;
+  padding-bottom: 13px;
+}
+
+.za-view-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  width: 100%;
+  min-height: 44px;
+  margin-top: 19px;
+  padding: 10px 16px;
+
+  border: 1px solid #eadbd1;
+  border-radius: 25px;
+
+  background: #fffdfa;
+  color: #9c211a;
+
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-view-all svg {
+  margin-left: auto;
+}
+
+.za-view-all span {
+  margin-left: auto;
+}
+
+.za-view-all:hover {
+  background: #fff4ed;
+}
+
+/* ========================================
+   EMPTY STATES
+======================================== */
+
+.za-empty {
+  margin: 0;
+  padding: 20px 5px;
+
+  color: #85766d;
+  font-size: 12px;
+}
+
+/* ========================================
+   OTHER ADMIN PAGE PLACEHOLDERS
+======================================== */
+
+.za-placeholder {
+  max-width: 650px;
+  margin: 75px auto;
+  padding: 50px 25px;
+
+  border: 1px solid #f0e5dd;
+  border-radius: 22px;
+
+  background: #fffdfa;
+  text-align: center;
+}
+
+.za-placeholder > svg {
+  color: #9f231b;
+}
+
+.za-placeholder h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 44px;
+  font-weight: 500;
+}
+
+.za-placeholder > p:not(.za-kicker) {
+  color: #776b65;
+  line-height: 1.7;
+}
+
+.za-placeholder .za-primary {
+  margin-top: 20px;
+}
+
+/* ========================================
+   DESKTOP
+======================================== */
+
+@media (min-width: 901px) {
+  .za-header > .za-icon-button {
+    display: none;
+  }
+}
+
+/* ========================================
+   MEDIUM DESKTOP
+======================================== */
+
+@media (max-width: 1350px) {
+  .za-panels {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .za-products-panel {
+    grid-column: span 2;
+  }
+
+  .za-hero-art {
+    left: 63%;
+  }
+
+  .za-hero-handwriting {
+    font-size: 30px;
+  }
+}
+
+/* ========================================
+   TABLET
+======================================== */
+
+@media (max-width: 900px) {
+  .za-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+
+  .za-sidebar.za-sidebar-open {
+    transform: translateX(0);
+  }
+
+  .za-backdrop {
+    display: block;
+
+    position: fixed;
+    z-index: 29;
+    inset: 0;
+
+    border: none;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .za-close {
+    display: inline-flex;
+
+    position: absolute;
+    right: 12px;
+    top: 12px;
+
+    border: none;
+    background: transparent;
+    color: #fff;
+  }
+
+  .za-main {
+    margin-left: 0;
+  }
+
+  .za-header {
+    padding: 0 18px;
+  }
+
+  .za-content {
+    padding: 0 15px 25px;
+  }
+
+  .za-hero {
+    padding: 23px 25px 30px;
+  }
+
+  .za-hero-art {
+    left: 66%;
+  }
+}
+
+/* ========================================
+   MOBILE
+======================================== */
+
+@media (max-width: 650px) {
+  .za-header {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .za-user,
+  .za-user-chevron {
+    display: none;
+  }
+
+  .za-search {
+    padding: 10px 12px;
+  }
+
+  .za-content {
+    padding: 0 10px 20px;
+  }
+
+  .za-hero {
+    min-height: 175px;
+    padding: 20px 15px;
+
+    background-position: center, 72% center;
+  }
+
+  .za-hero .za-hero-title {
+    font-size: clamp(30px, 8vw, 43px);
+    letter-spacing: -1.4px;
+    white-space: normal;
+  }
+
+  .za-hero .za-hero-description {
+    font-size: 12px;
+  }
+
+  .za-hero-art {
+    display: none;
+  }
+
+  .za-stats {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin-top: 12px;
+  }
+
+  .za-stat {
+    min-height: 95px;
+    padding: 15px;
+  }
+
+  .za-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .za-products-panel {
+    grid-column: auto;
+  }
+
+  .za-panel-head {
+    flex-wrap: wrap;
+  }
+
+  .za-panel h2 {
+    font-size: 24px;
+  }
+
+  .za-product-controls {
+    flex-wrap: wrap;
+  }
+
+  .za-product-search {
+    width: 100%;
+  }
+
+  .za-table {
+    min-width: 480px;
+  }
+
+  .za-bookings-table {
+    min-width: 410px;
+  }
+}
+
+/* ===== SIDEBAR SCROLLING FIX ===== */
+
+.za-sidebar {
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #b66c57 transparent;
+}
+
+.za-sidebar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.za-sidebar::-webkit-scrollbar-thumb {
+  background: #b66c57;
+  border-radius: 10px;
+}
+
+.za-sidebar-bottom {
+  flex-shrink: 0;
+  min-height: 205px;
+  margin-top: 24px;
+}
+
+/* FIXED SIDEBAR — NO SCROLLING */
+
+.za-sidebar {
+  height: 100vh !important;
+  height: 100dvh !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 15px 0;
+}
+
+.za-brand {
+  flex-shrink: 0;
+  margin-bottom: 18px;
+}
+
+.za-brand-logo,
+.za-brand img {
+  width: 90px;
+  height: 90px;
+}
+
+.za-brand strong {
+  font-size: 27px;
+}
+
+.za-nav {
+  flex-shrink: 0;
+  gap: 3px;
+}
+
+.za-nav-link {
+  min-height: 42px;
+  padding: 9px 15px;
+}
+
+.za-sidebar-secondary {
+  flex-shrink: 0;
+  margin-top: 20px;
+  padding-top: 15px;
+  gap: 3px;
+}
+
+.za-sidebar-bottom {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.za-leaf-art {
+  position: absolute;
+  left: -25px;
+  bottom: -12px;
+  width: 155px;
+  height: 190px;
+  max-height: 100%;
+}
+
+.za-sidebar-quote {
+  position: absolute;
+  right: 2px;
+  bottom: 20px;
+  font-size: 22px;
+}
+
+/* Adjust for shorter laptop screens */
+@media (max-height: 750px) {
+  .za-brand-logo,
+  .za-brand img {
+    width: 72px;
+    height: 72px;
+  }
+
+  .za-brand {
+    margin-bottom: 10px;
+  }
+
+  .za-nav-link {
+    min-height: 37px;
+    padding: 7px 13px;
+  }
+
+  .za-sidebar-secondary {
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+
+  .za-sidebar-quote {
+    font-size: 19px;
+    bottom: 10px;
+  }
+
+  .za-leaf-art {
+    height: 135px;
+  }
+}
+
+
+/* ==========================================
+   ZEN CAFÉ — FINAL TYPOGRAPHY ONLY
+   ========================================== */
+
+/* 1. Elegant luxury serif: Zen Café Admin */
+
+.za-shell .za-hero h1.za-hero-title {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  font-size: clamp(38px, 3.7vw, 60px) !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: -1.8px !important;
+  line-height: 1.2 !important;
+  text-transform: none !important;
+  font-variant: normal !important;
+  color: #15100d !important;
+}
+
+/* 2. Premium handwritten text: Great Food... */
+
+.za-shell .za-hero .za-hero-handwriting,
+.za-shell .za-hero .za-hero-handwriting span {
+  font-family: 'Italianno', cursive !important;
+  font-size: 46px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: 0 !important;
+  line-height: 0.85 !important;
+  text-transform: none !important;
+}
+
+.za-shell .za-hero .za-hero-handwriting {
+  transform: rotate(-10deg);
+  color: #a34c2e;
+}
+
+.za-shell .za-hero .za-hero-handwriting span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* 3. Delicate sidebar calligraphy */
+
+.za-shell .za-sidebar .za-sidebar-quote,
+.za-shell .za-sidebar .za-sidebar-quote span {
+  font-family: 'Allura', cursive !important;
+  font-size: 30px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: 0 !important;
+  line-height: 0.85 !important;
+  text-transform: none !important;
+}
+
+.za-shell .za-sidebar .za-sidebar-quote {
+  color: #edb69e;
+  transform: rotate(-9deg);
+}
+
+/* Keep the decorative hearts small */
+
+.za-shell .za-hero .za-hero-handwriting b,
+.za-shell .za-sidebar .za-sidebar-quote b {
+  font-family: Georgia, serif !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+/* ==========================================
+   PHASE 2 — MENU / PRODUCTS PAGE
+========================================== */
+
+.za-products-page {
+  padding: 30px 8px 50px;
+  color: #251b17;
+}
+
+.za-products-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 23px;
+  color: #99867b;
+  font-size: 12px;
+}
+
+.za-products-breadcrumb button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8c6b5e;
+}
+
+.za-products-breadcrumb strong {
+  color: #9f211b;
+  font-weight: 600;
+}
+
+.za-products-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 26px;
+}
+
+.za-products-page-head h1 {
+  margin: 5px 0 8px;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(32px, 3vw, 43px);
+  font-weight: 400;
+  letter-spacing: -1.2px;
+  text-transform: none;
+}
+
+.za-products-page-head > div > p:last-child {
+  margin: 0;
+  color: #84766d;
+  font-size: 13px;
+}
+
+.za-product-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 15px;
+  margin-bottom: 23px;
+}
+
+.za-product-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px 24px;
+  border: 1px solid #f0e4db;
+  border-radius: 17px;
+  background: #fffdfa;
+}
+
+.za-product-summary-card:nth-child(1) {
+  background: #fff0ef;
+}
+
+.za-product-summary-card:nth-child(2) {
+  background: #fff9ef;
+}
+
+.za-product-summary-card:nth-child(3) {
+  background: #f1f8ff;
+}
+
+.za-product-summary-card:nth-child(4) {
+  background: #eff9f0;
+}
+
+.za-product-summary-card > span {
+  color: #5b4c43;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-product-summary-card > strong {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 36px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.za-product-summary-card > small {
+  color: #897970;
+  font-size: 11px;
+}
+
+.za-product-management-card {
+  padding: 25px;
+  border: 1px solid #efe3da;
+  border-radius: 19px;
+  background: #fffdfa;
+  box-shadow: 0 8px 24px rgba(70, 30, 10, 0.035);
+}
+
+.za-product-management-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 24px;
+}
+
+.za-product-management-top h2 {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 26px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.za-product-management-top h2 svg {
+  color: #aa251e;
+}
+
+.za-product-management-top p {
+  margin: 7px 0 0;
+  color: #8b7b72;
+  font-size: 12px;
+}
+
+.za-products-count {
+  padding: 8px 13px;
+  border-radius: 25px;
+  background: #f8eee8;
+  color: #9d241e;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.za-product-management-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.za-management-search {
+  width: min(100%, 320px);
+}
+
+.za-management-table {
+  font-size: 12px;
+}
+
+.za-management-table thead {
+  background: #f8f0e9;
+}
+
+.za-management-table th {
+  padding: 15px 13px;
+  font-size: 11px;
+}
+
+.za-management-table td {
+  padding: 13px;
+}
+
+.za-management-product {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 190px;
+}
+
+.za-management-product img {
+  width: 64px;
+  height: 62px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  object-fit: cover;
+}
+
+.za-management-product strong {
+  font-size: 12px;
+}
+
+.za-management-product small {
+  max-width: 230px;
+  color: #94867d;
+  font-size: 11px;
+}
+
+.za-management-price {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.za-type-pill {
+  display: inline-flex;
+  padding: 7px 12px;
+  border-radius: 20px;
+  background: #f8eee8;
+  color: #7c4033;
+  font-size: 11px;
+}
+
+.za-availability-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 20px;
+  background: #f0eeeb;
+  color: #695e57;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.za-availability-toggle.is-active {
+  background: #def4e0;
+  color: #196b32;
+}
+
+.za-management-empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: #8d7c72;
+}
+
+.za-management-empty svg {
+  color: #a72821;
+}
+
+.za-management-empty h3 {
+  margin: 12px 0 6px;
+  color: #2b201b;
+  font-size: 18px;
+}
+
+.za-management-empty p {
+  font-size: 12px;
+}
+
+/* EDIT PRODUCT DIALOG */
+
+.za-edit-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(25, 13, 9, 0.55);
+}
+
+.za-edit-dialog {
+  width: min(100%, 510px);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 28px;
+  border-radius: 20px;
+  background: #fffdfa;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.2);
+}
+
+.za-edit-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+
+.za-edit-dialog-head h2 {
+  margin: 5px 0 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 30px;
+  font-weight: 400;
+}
+
+.za-edit-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.za-edit-dialog form > label:not(.za-edit-checkbox) {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #4a3931;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-edit-dialog input:not([type="checkbox"]),
+.za-edit-dialog textarea {
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid #eadcd2;
+  border-radius: 10px;
+  outline: none;
+  background: #fff;
+  color: #2a211d;
+  font-size: 13px;
+}
+
+.za-edit-dialog input:focus,
+.za-edit-dialog textarea:focus {
+  border-color: #a62b23;
+}
+
+.za-edit-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.za-edit-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.za-edit-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 15px;
+  border: 1px solid #eadbd1;
+  border-radius: 10px;
+  background: #fff;
+  color: #6e554a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 1000px) {
+  .za-product-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 650px) {
+  .za-products-page {
+    padding: 20px 0 35px;
+  }
+
+  .za-products-page-head,
+  .za-product-management-top,
+  .za-product-management-filters {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .za-product-summary {
+    gap: 10px;
+  }
+
+  .za-product-summary-card {
+    padding: 16px;
+  }
+
+  .za-product-management-card {
+    padding: 15px;
+  }
+
+  .za-management-search {
+    width: 100%;
+  }
+
+  .za-management-table {
+    min-width: 730px;
+  }
+}
+
+/* ==========================================
+   ZEN CAFÉ — ADD PRODUCT PAGE
+========================================== */
+
+.za-add-product-page {
+  padding: 28px 8px 50px;
+}
+
+.za-add-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+
+.za-add-page-head h1 {
+  margin: 7px 0 8px;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(32px, 3vw, 44px);
+  font-weight: 400;
+  letter-spacing: -1px;
+  text-transform: none;
+}
+
+.za-add-page-head > div > p:last-child {
+  margin: 0;
+  color: #8c7c72;
+  font-size: 13px;
+}
+
+.za-add-back,
+.za-add-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 17px;
+  border: 1px solid #e8d8cd;
+  border-radius: 11px;
+  background: #fffdfa;
+  color: #873128;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-add-product-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.za-add-product-left,
+.za-add-product-right {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.za-add-card {
+  padding: 25px;
+  border: 1px solid #efe1d7;
+  border-radius: 18px;
+  background: #fffdfa;
+  box-shadow: 0 7px 25px rgba(79, 33, 14, 0.035);
+}
+
+.za-add-card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 25px;
+}
+
+.za-add-card-heading > svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+  color: #aa241e;
+}
+
+.za-add-card-heading h2 {
+  margin: 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 25px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.za-add-card-heading p {
+  margin: 5px 0 0;
+  color: #918076;
+  font-size: 12px;
+}
+
+.za-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+
+.za-add-field > label {
+  color: #4b3931;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-add-field input,
+.za-add-field select,
+.za-add-field textarea,
+.za-add-new-category input {
+  width: 100%;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid #eadbd0;
+  border-radius: 10px;
+  outline: none;
+  background: #fff;
+  color: #30221d;
+  font: 13px Inter, Arial, sans-serif;
+}
+
+.za-add-field input:focus,
+.za-add-field select:focus,
+.za-add-field textarea:focus,
+.za-add-new-category input:focus {
+  border-color: #a62a22;
+  box-shadow: 0 0 0 3px rgba(166, 42, 34, 0.08);
+}
+
+.za-add-field textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.za-add-two-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.za-add-kind-picker {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.za-add-kind-picker button {
+  padding: 14px;
+  border: 1px solid #e9dcd3;
+  border-radius: 11px;
+  background: #fff;
+  color: #6c5147;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-add-kind-picker button.active {
+  border-color: #a5201b;
+  background: #fff1ef;
+  color: #a5201b;
+}
+
+.za-add-category-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: #a3221c;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-add-new-category {
+  display: flex;
+  gap: 10px;
+  margin: -7px 0 20px;
+}
+
+.za-add-new-category button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 10px;
+  background: #a5201b;
+  color: white;
+  cursor: pointer;
+}
+
+.za-add-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 16px 0;
+  border-bottom: 1px solid #f1e8e1;
+  cursor: pointer;
+}
+
+.za-add-toggle-row:last-child {
+  border-bottom: 0;
+}
+
+.za-add-toggle-row > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.za-add-toggle-row strong {
+  color: #3d2e27;
+  font-size: 13px;
+}
+
+.za-add-toggle-row small {
+  color: #95847a;
+  font-size: 11px;
+}
+
+.za-add-switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.za-add-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  border-radius: 20px;
+  background: #d9cbc1;
+  transition: background 0.2s;
+}
+
+.za-add-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+
+.za-add-switch-input:checked + .za-add-switch {
+  background: #a5201b;
+}
+
+.za-add-switch-input:checked + .za-add-switch::after {
+  transform: translateX(20px);
+}
+
+.za-add-switch-input:focus-visible + .za-add-switch {
+  outline: 3px solid #df9d86;
+  outline-offset: 3px;
+}
+
+.za-add-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 225px;
+  overflow: hidden;
+  padding: 15px;
+  border: 2px dashed #e6cfc2;
+  border-radius: 14px;
+  background: #fff8f3;
+  color: #a52a21;
+  cursor: pointer;
+}
+
+.za-add-upload strong {
+  font-size: 13px;
+}
+
+.za-add-upload small {
+  color: #958277;
+  font-size: 11px;
+}
+
+.za-add-upload img {
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+
+.za-add-remove-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #a5201b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.za-add-preview {
+  overflow: hidden;
+  border: 1px solid #efe3da;
+  border-radius: 15px;
+  background: #fff;
+}
+
+.za-add-preview-image {
+  display: grid;
+  place-items: center;
+  height: 210px;
+  overflow: hidden;
+  background: #f7eae0;
+  color: #bd8572;
+}
+
+.za-add-preview-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.za-add-preview-info {
+  padding: 18px;
+}
+
+.za-add-preview-info > span {
+  color: #a92d24;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.za-add-preview-info h3 {
+  margin: 7px 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.za-add-preview-info p {
+  min-height: 35px;
+  margin: 0 0 15px;
+  color: #8b7a70;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.za-add-preview-info > strong {
+  color: #9e241c;
+  font-size: 16px;
+}
+
+.za-add-preview-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 18px;
+}
+
+.za-add-preview-badges span {
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: #fff0e5;
+  color: #9e4b20;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.za-add-feedback {
+  margin: 20px 0;
+  padding: 13px 16px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.za-add-error {
+  background: #fff0ef;
+  color: #a51d18;
+}
+
+.za-add-success {
+  background: #e9f7eb;
+  color: #186b32;
+}
+
+.za-add-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 25px;
+  padding: 20px 0;
+}
+
+.za-add-actions .za-primary {
+  padding: 13px 25px;
+}
+
+@media (max-width: 1100px) {
+  .za-add-product-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .za-add-product-page {
+    padding: 20px 0 35px;
+  }
+
+  .za-add-page-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .za-add-card {
+    padding: 18px;
+  }
+
+  .za-add-two-columns {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .za-add-actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* ZEN CAFÉ — OFFERS & PROMOTIONS */
+
+.za-offers-page {
+  padding: 28px 8px 50px;
+}
+
+.za-offer-table-icon {
+  width: 49px;
+  height: 49px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #fff0e8;
+  color: #a32722;
+}
+
+.za-offer-code {
+  display: inline-block;
+  padding: 7px 11px;
+  border: 1px dashed #dfb5a3;
+  border-radius: 7px;
+  background: #fff7f1;
+  color: #922820;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.za-offer-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #49362e;
+}
+
+.za-offer-dates small {
+  color: #9c877a;
+  font-size: 11px;
+}
+
+.za-offer-dialog {
+  width: min(590px, calc(100vw - 32px));
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.za-offer-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.za-offer-dialog form > label,
+.za-offer-form-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #513c32;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-offer-dialog input:not([type="checkbox"]),
+.za-offer-dialog select,
+.za-offer-dialog textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid #e9d9cf;
+  border-radius: 10px;
+  outline: none;
+  background: #fffdfa;
+  color: #33241f;
+  font: 13px Inter, Arial, sans-serif;
+}
+
+.za-offer-dialog input:focus,
+.za-offer-dialog select:focus,
+.za-offer-dialog textarea:focus {
+  border-color: #a32722;
+}
+
+.za-offer-dialog textarea {
+  resize: vertical;
+}
+
+.za-offer-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.za-offer-dialog .za-edit-checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.za-offer-dialog .za-edit-dialog-actions {
+  margin-top: 10px;
+}
+
+@media (max-width: 650px) {
+  .za-offers-page {
+    padding: 20px 0 35px;
+  }
+
+  .za-offer-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================
+   ZEN CAFÉ — OFFER IMAGE UPLOAD
+========================================== */
+
+.za-offer-image-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.za-offer-image-label {
+  color: #513c32;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-offer-image-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 175px;
+  padding: 12px;
+  overflow: hidden;
+  border: 2px dashed #e6cfc2;
+  border-radius: 13px;
+  background: #fff8f3;
+  color: #a32722;
+  cursor: pointer;
+}
+
+.za-offer-image-upload:hover {
+  border-color: #a32722;
+  background: #fff3ed;
+}
+
+.za-offer-image-upload:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.za-offer-image-upload strong {
+  font-size: 13px;
+}
+
+.za-offer-image-upload small {
+  color: #938075;
+  font-size: 11px;
+}
+
+.za-offer-image-upload img {
+  width: 100%;
+  max-height: 230px;
+  object-fit: contain;
+  border-radius: 9px;
+}
+
+.za-offer-image-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.za-offer-image-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  color: #a32722;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-offer-table-icon {
+  overflow: hidden;
+}
+
+.za-offer-table-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+/* ==========================================
+   ZEN CAFÉ — ROOM BOOKINGS
+========================================== */
+
+.za-bookings-page {
+  padding: 28px 8px 50px;
+}
+
+.za-booking-customer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 180px;
+}
+
+.za-booking-avatar {
+  width: 43px;
+  height: 43px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #f7e8df;
+  color: #9d251d;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.za-booking-customer > div:last-child,
+.za-booking-date {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.za-booking-customer strong {
+  font-size: 13px;
+  color: #352820;
+}
+
+.za-booking-customer small,
+.za-booking-date small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #9c887b;
+  font-size: 11px;
+}
+
+.za-booking-room,
+.za-booking-guests {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #6b5145;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.za-booking-date strong {
+  color: #3d3029;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.za-booking-status {
+  padding: 9px 12px;
+  border: 1px solid #e9d9cf;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  outline: none;
+}
+
+.za-booking-status-pending {
+  background: #fff4d8;
+  color: #94610d;
+  border-color: #f1dda6;
+}
+
+.za-booking-status-confirmed {
+  background: #e8f7eb;
+  color: #26733b;
+  border-color: #c6e9cf;
+}
+
+.za-booking-status-completed {
+  background: #e8f0ff;
+  color: #2e589a;
+  border-color: #cdddf8;
+}
+
+.za-booking-status-cancelled {
+  background: #fce9e7;
+  color: #a12b25;
+  border-color: #f0cac6;
+}
+
+.za-booking-status-rejected {
+  background: #fce9e7;
+  color: #a12b25;
+  border-color: #f0cac6;
+}
+
+.za-booking-status-modification_proposed {
+  background: #fef0e6;
+  color: #b3531b;
+  border-color: #fbd6be;
+}
+
+/* Premium Action Buttons: Accept | Reject | Modify */
+.za-booking-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.za-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.za-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.za-action-accept {
+  background: #257039;
+  color: #ffffff;
+  border-color: #257039;
+}
+
+.za-action-accept:hover:not(:disabled) {
+  background: #1c572c;
+  border-color: #1c572c;
+}
+
+.za-action-reject {
+  background: #ffffff;
+  color: #b42318;
+  border-color: #f0cac6;
+}
+
+.za-action-reject:hover:not(:disabled) {
+  background: #fce9e7;
+}
+
+.za-action-modify {
+  background: #ffffff;
+  color: #b3531b;
+  border-color: #fbd6be;
+}
+
+.za-action-modify:hover:not(:disabled) {
+  background: #fef0e6;
+}
+
+.za-blocks-panel {
+  margin-top: 24px;
+}
+
+/* BOOKING MODAL */
+
+.za-booking-dialog {
+  width: min(650px, calc(100vw - 32px));
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.za-booking-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.za-booking-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.za-booking-form-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0e2d9;
+  color: #90251e;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.za-booking-form-section label,
+.za-booking-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #513c32;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-booking-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.za-booking-dialog input,
+.za-booking-dialog select,
+.za-booking-dialog textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid #e9d9cf;
+  border-radius: 10px;
+  outline: none;
+  background: #fffdfa;
+  color: #33241f;
+  font: 13px Inter, Arial, sans-serif;
+}
+
+.za-booking-dialog input:focus,
+.za-booking-dialog select:focus,
+.za-booking-dialog textarea:focus {
+  border-color: #a32722;
+}
+
+.za-booking-dialog textarea {
+  resize: vertical;
+}
+
+.za-booking-dialog .za-edit-dialog-actions {
+  margin-top: 5px;
+}
+
+@media (max-width: 650px) {
+  .za-bookings-page {
+    padding: 20px 0 35px;
+  }
+
+  .za-booking-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================
+   ZEN CAFÉ — SETTINGS PAGE
+========================================== */
+
+.za-settings-page {
+  padding: 28px 8px 50px;
+}
+
+.za-settings-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border: 1px solid #e7cfc2;
+  border-radius: 10px;
+  background: #fffdfb;
+  color: #9d281f;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-settings-reset:hover {
+  background: #fff1e9;
+}
+
+.za-settings-layout {
+  display: grid;
+  grid-template-columns: 245px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  margin-top: 26px;
+}
+
+.za-settings-tabs,
+.za-settings-content {
+  border: 1px solid #eddfd5;
+  border-radius: 17px;
+  background: #fffdfb;
+  box-shadow: 0 4px 24px rgba(70, 35, 22, 0.025);
+}
+
+.za-settings-tabs {
+  padding: 16px 12px;
+}
+
+.za-settings-tabs-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 12px 20px;
+  color: #432e25;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.za-settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 13px;
+  margin-bottom: 5px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #705a4e;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.za-settings-tab:hover {
+  background: #fff2ec;
+}
+
+.za-settings-tab.active {
+  background: #a32722;
+  color: #ffffff;
+}
+
+.za-settings-tabs-footer {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-top: 28px;
+  padding: 20px 12px 5px;
+  border-top: 1px solid #f0e5dd;
+  color: #9d281f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.za-settings-tabs-footer span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.za-settings-tabs-footer small {
+  color: #9d8a7f;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.za-settings-no-results {
+  padding: 12px;
+  color: #9d8a7f;
+  font-size: 12px;
+}
+
+.za-settings-content {
+  min-width: 0;
+  padding: 30px;
+}
+
+.za-settings-content form {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+}
+
+.za-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.za-settings-section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #f0e4db;
+  color: #a32722;
+}
+
+.za-settings-section-heading h2 {
+  margin: 0 0 7px;
+  color: #30241e;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.za-settings-section-heading p {
+  margin: 0;
+  color: #9d897c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.za-settings-fields,
+.za-settings-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.za-settings-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.za-settings-fields label,
+.za-settings-field-grid label,
+.za-settings-section > label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: #503a2f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.za-settings-fields label > span,
+.za-settings-field-grid label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.za-settings-content input,
+.za-settings-content select,
+.za-settings-content textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #e8d8cd;
+  border-radius: 10px;
+  outline: none;
+  background: #fffdfa;
+  color: #3d2e27;
+  font: 13px Inter, Arial, sans-serif;
+}
+
+.za-settings-content input:focus,
+.za-settings-content select:focus,
+.za-settings-content textarea:focus {
+  border-color: #a32722;
+  box-shadow: 0 0 0 3px rgba(163, 39, 34, 0.07);
+}
+
+.za-settings-content textarea {
+  resize: vertical;
+}
+
+.za-settings-subheading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 4px;
+  color: #a32722;
+}
+
+.za-settings-subheading h3 {
+  margin: 0;
+  color: #49352b;
+  font-size: 14px;
+}
+
+.za-settings-toggle-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.za-settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 19px 0;
+  border-bottom: 1px solid #f1e6df;
+}
+
+.za-settings-toggle-row strong {
+  color: #3e3028;
+  font-size: 13px;
+}
+
+.za-settings-toggle-row p {
+  margin: 6px 0 0;
+  color: #9b887c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.za-settings-switch {
+  width: 45px;
+  height: 25px;
+  flex-shrink: 0;
+  padding: 3px;
+  border: none;
+  border-radius: 25px;
+  background: #d9cbc2;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.za-settings-switch.is-on {
+  background: #a32722;
+}
+
+.za-settings-switch span {
+  display: block;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+
+.za-settings-switch.is-on span {
+  transform: translateX(20px);
+}
+
+.za-settings-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px 17px;
+  border: 1px solid #eeded0;
+  border-radius: 11px;
+  background: #fff7ef;
+  color: #a32722;
+}
+
+.za-settings-info svg {
+  flex-shrink: 0;
+}
+
+.za-settings-info p {
+  margin: 0;
+  color: #816959;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.za-settings-admin-profile {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 18px;
+  border: 1px solid #eee0d6;
+  border-radius: 12px;
+  background: #fff8f3;
+}
+
+.za-settings-admin-avatar {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #f0d4c6;
+  color: #91231e;
+}
+
+.za-settings-admin-profile > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.za-settings-admin-profile strong {
+  color: #382920;
+  font-size: 15px;
+}
+
+.za-settings-admin-profile span {
+  color: #9b877a;
+  font-size: 11px;
+}
+
+.za-settings-security-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 20px;
+  border: 1px solid #ecded3;
+  border-radius: 12px;
+}
+
+.za-settings-security-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: #f9eae2;
+  color: #a32722;
+}
+
+.za-settings-security-card h3 {
+  margin: 0 0 9px;
+  color: #3d2d25;
+  font-size: 14px;
+}
+
+.za-settings-security-card p {
+  margin: 0;
+  color: #9b887a;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.za-settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding-top: 24px;
+  border-top: 1px solid #eee1d8;
+}
+
+.za-settings-unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #8c786a;
+  font-size: 12px;
+}
+
+.za-settings-unsaved-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d58b2e;
+}
+
+.za-settings-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.za-settings-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 15px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.za-settings-alert.is-success {
+  background: #e9f7ed;
+  color: #277640;
+}
+
+.za-settings-alert.is-error {
+  background: #fcebe8;
+  color: #a32722;
+}
+
+@media (max-width: 1050px) {
+  .za-settings-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .za-settings-content {
+    padding: 23px;
+  }
+}
+
+@media (max-width: 760px) {
+  .za-settings-page {
+    padding: 20px 0 35px;
+  }
+
+  .za-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .za-settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .za-settings-tabs-heading,
+  .za-settings-tabs-footer {
+    grid-column: 1 / -1;
+  }
+
+  .za-settings-tab {
+    margin-bottom: 0;
+  }
+
+  .za-settings-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .za-settings-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .za-settings-action-buttons {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 450px) {
+  .za-settings-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .za-settings-content {
+    padding: 18px;
+  }
+
+  .za-settings-action-buttons {
+    flex-wrap: wrap;
+  }
+}
+
+/* ==========================================
+   ZEN CAFÉ — HEADER PROFILE DROPDOWN
+========================================== */
+
+.za-header {
+  overflow: visible;
+}
+
+.za-header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.za-header-dropdown-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.za-profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.za-profile-trigger:hover {
+  background: #fff5ef;
+}
+
+.za-profile-trigger .za-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.za-profile-trigger .za-user {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.za-profile-trigger .za-user strong {
+  color: #30241e;
+}
+
+.za-profile-trigger .za-user small {
+  color: #9d8a7d;
+}
+
+.za-user-chevron {
+  transition: transform 0.2s ease;
+}
+
+.za-user-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+/* DROPDOWN */
+
+.za-header-dropdown {
+  position: absolute;
+  top: calc(100% + 15px);
+  right: 0;
+  z-index: 1000;
+  width: 290px;
+  overflow: hidden;
+  border: 1px solid #ebd9cd;
+  border-radius: 15px;
+  background: #fffdfb;
+  box-shadow: 0 15px 45px rgba(45, 22, 15, 0.14);
+  animation: za-dropdown-appear 0.16s ease-out;
+}
+
+@keyframes za-dropdown-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* PROFILE SUMMARY */
+
+.za-profile-dropdown-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 19px;
+  background: #fff5ee;
+  border-bottom: 1px solid #f0e1d6;
+}
+
+.za-profile-dropdown-avatar {
+  display: grid;
+  place-items: center;
+  width: 47px;
+  height: 47px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #ecd1c3;
+  color: #8c201b;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.za-profile-dropdown-top > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.za-profile-dropdown-top strong {
+  color: #33251f;
+  font-size: 14px;
+}
+
+.za-profile-dropdown-top small {
+  color: #8e7a6f;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.za-profile-dropdown-top span {
+  color: #a32722;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* PROFILE LINKS */
+
+.za-profile-dropdown-links {
+  padding: 9px;
+}
+
+.za-profile-dropdown-links button,
+.za-profile-dropdown-bottom button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #4c382f;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.za-profile-dropdown-links button:hover {
+  background: #fff2eb;
+  color: #a32722;
+}
+
+.za-profile-dropdown-bottom {
+  padding: 9px;
+  border-top: 1px solid #f0e3d9;
+}
+
+.za-profile-dropdown-bottom .za-profile-logout {
+  color: #a32722;
+}
+
+.za-profile-dropdown-bottom .za-profile-logout:hover {
+  background: #fff0ec;
+}
+
+/* NOTIFICATION BUTTON */
+
+.za-notification-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: #8d251e;
+  cursor: pointer;
+}
+
+.za-notification-button:hover {
+  background: #fff2ec;
+  border-radius: 9px;
+}
+
+.za-notification-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #b32620;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+/* NOTIFICATION DROPDOWN */
+
+.za-notification-dropdown {
+  width: 330px;
+}
+
+.za-dropdown-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 17px 18px;
+  border-bottom: 1px solid #f0e1d6;
+}
+
+.za-dropdown-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.za-dropdown-heading strong {
+  color: #33241f;
+  font-size: 14px;
+}
+
+.za-dropdown-heading small {
+  color: #a18b7d;
+  font-size: 11px;
+}
+
+.za-dropdown-close {
+  display: grid;
+  place-items: center;
+  padding: 5px;
+  border: none;
+  background: transparent;
+  color: #a32722;
+  cursor: pointer;
+}
+
+.za-notification-content {
+  padding: 17px;
+}
+
+.za-notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.za-notification-item-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: #fff0e8;
+  color: #a32722;
+}
+
+.za-notification-item strong {
+  color: #3e2e27;
+  font-size: 12px;
+}
+
+.za-notification-item p {
+  margin: 6px 0 0;
+  color: #988477;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.za-dropdown-footer-button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-top: 1px solid #f0e1d6;
+  background: #fff8f3;
+  color: #a32722;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.za-dropdown-footer-button:hover {
+  background: #fff0e8;
+}
+
+@media (max-width: 600px) {
+  .za-header-right {
+    gap: 7px;
+  }
+
+  .za-profile-trigger {
+    gap: 6px;
+  }
+
+  .za-profile-trigger .za-user {
+    display: none;
+  }
+
+  .za-header-dropdown {
+    width: min(290px, calc(100vw - 24px));
+  }
+
+  .za-notification-dropdown {
+    width: min(330px, calc(100vw - 24px));
+  }
+}
+
+/* ==========================================
+   ZEN CAFÉ — ADMIN PROFILE IMAGE
+========================================== */
+
+.za-profile-photo-panel {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 26px;
+  border: 1px solid #eddfd5;
+  border-radius: 15px;
+  background: #fff8f3;
+}
+
+.za-profile-photo-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 125px;
+  height: 125px;
+  flex-shrink: 0;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: #efd4c7;
+  color: #a32722;
+  box-shadow: 0 5px 18px rgba(70, 35, 22, 0.1);
+}
+
+.za-profile-photo-preview img,
+.za-profile-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.za-profile-camera-icon {
+  position: absolute;
+  right: 2px;
+  bottom: 3px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #a32722;
+  color: #fff;
+}
+
+.za-profile-photo-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.za-profile-photo-details h3 {
+  margin: 0;
+  color: #352720;
+  font-size: 17px;
+}
+
+.za-profile-photo-details p {
+  margin: 0;
+  color: #90796b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.za-profile-photo-details small {
+  color: #aa9486;
+  font-size: 11px;
+}
+
+.za-profile-photo-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.za-profile-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 15px;
+  border: 1px solid #ebd0c8;
+  border-radius: 9px;
+  background: #fff;
+  color: #a32722;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.za-profile-remove-button:hover {
+  background: #fff0ed;
+}
+
+.za-settings-admin-avatar {
+  overflow: hidden;
+}
+
+.za-settings-admin-avatar img {
+  display: block;
+}
+
+.za-profile-trigger .za-avatar,
+.za-profile-dropdown-avatar {
+  overflow: hidden;
+}
+
+.za-profile-trigger .za-avatar img,
+.za-profile-dropdown-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+@media (max-width: 600px) {
+  .za-profile-photo-panel {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .za-profile-photo-preview {
+    width: 110px;
+    height: 110px;
+  }
+}
+
+/* =====================================
+   ZEN CAFE SWEETALERT2
+===================================== */
+
+.zen-sweet-alert {
+  border-radius: 20px !important;
+  padding: 28px !important;
+  box-shadow: 0 20px 70px rgba(54, 20, 28, 0.18) !important;
+  font-family: inherit !important;
+}
+
+.zen-sweet-title {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  font-weight: 700 !important;
+  color: #541f29 !important;
+  font-size: 26px !important;
+}
+
+.zen-sweet-confirm,
+.zen-sweet-cancel {
+  border-radius: 10px !important;
+  padding: 12px 24px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  transition: all 0.2s ease !important;
+}
+
+.zen-sweet-confirm:hover {
+  filter: brightness(0.9);
+  transform: translateY(-1px);
+}
+
+.zen-sweet-cancel:hover {
+  filter: brightness(0.95);
+}
+
+.zen-sweet-alert .swal2-html-container {
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+}
+
+@media (max-width: 600px) {
+  .zen-sweet-alert {
+    width: calc(100% - 32px) !important;
+    padding: 22px 16px !important;
+  }
+
+  .zen-sweet-title {
+    font-size: 22px !important;
+  }
+}

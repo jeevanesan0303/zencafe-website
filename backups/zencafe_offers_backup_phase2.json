@@ -1,0 +1,111 @@
+{
+  "database": "zencafe_db",
+  "user": "zencafe_app",
+  "timestamp": "2026-10-27T15:28:12.590Z",
+  "table": "public.offers",
+  "columns": [
+    {
+      "column_name": "id",
+      "data_type": "bigint",
+      "column_default": "nextval('offers_id_seq'::regclass)",
+      "is_nullable": "NO",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "title",
+      "data_type": "character varying",
+      "column_default": null,
+      "is_nullable": "NO",
+      "character_maximum_length": 200
+    },
+    {
+      "column_name": "description",
+      "data_type": "text",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "image_key",
+      "data_type": "text",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "image_url",
+      "data_type": "text",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "discount_type",
+      "data_type": "character varying",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": 20
+    },
+    {
+      "column_name": "discount_value",
+      "data_type": "numeric",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "starts_at",
+      "data_type": "timestamp with time zone",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "ends_at",
+      "data_type": "timestamp with time zone",
+      "column_default": null,
+      "is_nullable": "YES",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "column_default": "true",
+      "is_nullable": "NO",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "column_default": "now()",
+      "is_nullable": "NO",
+      "character_maximum_length": null
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "column_default": "now()",
+      "is_nullable": "NO",
+      "character_maximum_length": null
+    }
+  ],
+  "constraints": [
+    {
+      "constraint_name": "offers_pkey",
+      "constraint_type": "PRIMARY KEY",
+      "column_name": "id"
+    }
+  ],
+  "indexes": [
+    {
+      "indexname": "offers_pkey",
+      "indexdef": "CREATE UNIQUE INDEX offers_pkey ON public.offers USING btree (id)"
+    },
+    {
+      "indexname": "idx_offers_active",
+      "indexdef": "CREATE INDEX idx_offers_active ON public.offers USING btree (is_active)"
+    }
+  ],
+  "rowCount": 0,
+  "rows": []
+}
