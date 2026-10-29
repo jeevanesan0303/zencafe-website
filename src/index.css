@@ -11536,3 +11536,106 @@ html[data-theme="dark"]
     width: 100%;
   }
 }
+
+/* ============================================
+   ZEN CAFÉ — BOOKING DROPDOWN ALIGNMENT FIX
+============================================ */
+
+.zen-booking-select-fix select.field-input {
+  display: block;
+  width: 100%;
+  height: 54px;
+  min-height: 54px;
+
+  box-sizing: border-box;
+
+  padding: 0 42px 0 18px;
+
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: normal;
+
+  color: #382b26;
+  background-color: #ffffff;
+
+  border: 1px solid #e9e2df;
+  border-radius: 17px;
+
+  /* Remove inconsistent native dropdown arrows */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+
+  /* Consistent custom arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23382b26' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 16px 16px;
+
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Time picker: Hour / Minute / AM-PM */
+.zen-booking-select-fix
+  select[aria-label="Booking hour"],
+.zen-booking-select-fix
+  select[aria-label="Booking minute"],
+.zen-booking-select-fix
+  select[aria-label="AM or PM"] {
+  min-width: 0;
+  padding-left: 14px;
+  padding-right: 30px;
+
+  background-position: right 10px center;
+  background-size: 14px 14px;
+}
+
+/* Hover */
+.zen-booking-select-fix select.field-input:hover {
+  border-color: #cdb9ae;
+}
+
+/* Focus */
+.zen-booking-select-fix select.field-input:focus {
+  outline: none;
+  border-color: #a32722;
+  box-shadow: 0 0 0 3px rgba(163, 39, 34, 0.09);
+}
+
+/* Prevent clipping and inconsistent sizing */
+.zen-booking-select-fix .room-fields-grid {
+  min-width: 0;
+}
+
+.zen-booking-select-fix .field-label {
+  min-width: 0;
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  .zen-booking-select-fix select.field-input {
+    height: 50px;
+    min-height: 50px;
+    padding-left: 12px;
+    padding-right: 32px;
+    font-size: 13px;
+    background-position: right 10px center;
+  }
+
+  .zen-booking-select-fix
+    select[aria-label="Booking hour"],
+  .zen-booking-select-fix
+    select[aria-label="Booking minute"],
+  .zen-booking-select-fix
+    select[aria-label="AM or PM"] {
+    padding-left: 10px;
+    padding-right: 24px;
+    background-position: right 7px center;
+    background-size: 12px 12px;
+  }
+}

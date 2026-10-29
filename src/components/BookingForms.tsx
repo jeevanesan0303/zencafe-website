@@ -347,7 +347,7 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     <div className="room-booking-layout room-booking-layout-v121">
       <form
         onSubmit={submit}
-        className="room-booking-form room-booking-form-v121 panel p-6 sm:p-8"
+        className="room-booking-form room-booking-form-v121 zen-booking-select-fix panel p-6 sm:p-8"
       >
         <div className="room-form-head mb-6 flex items-start justify-between gap-4">
           <div>
