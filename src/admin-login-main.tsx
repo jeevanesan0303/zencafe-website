@@ -628,7 +628,7 @@ function AdminLogin() {
           {view === 'login' ? (
 
             <p className="text-xs text-[#9a8175]">
-              Zen Café Administration · Demo Login
+              
             </p>
 
           ) : (
