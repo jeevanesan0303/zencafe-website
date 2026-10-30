@@ -10,16 +10,16 @@ import {
 
 import {
   CalendarDays,
-  Eye,
-  Plus,
-  Tags,
-  UtensilsCrossed,
-  Pencil,
-  Trash2,
-  Search,
   ChevronRight,
+  Eye,
   MoreHorizontal,
+  Pencil,
+  Plus,
   RefreshCw,
+  Search,
+  Tags,
+  Trash2,
+  UtensilsCrossed,
 } from 'lucide-react'
 
 import {
@@ -29,11 +29,19 @@ import {
 } from '../../data/menuStore'
 
 import {
+  isOfferCurrentlyActive,
   readOffers,
   refreshOffers,
   subscribeOffers,
-  isOfferCurrentlyActive,
 } from '../../data/offerStore'
+
+import {
+  loadAdminBookings,
+  readRoomBookings,
+  subscribeRoomBookings,
+  type RoomBooking,
+  type BookingStatus,
+} from '../../data/bookingStore'
 
 import type { MenuItem } from '../../data/menu'
 import type { ZenOffer } from '../../data/offerStore'
@@ -41,19 +49,9 @@ import type { AdminPage } from '../AdminApp'
 
 import StatCard from '../components/StatCard'
 
-/* =========================================================
-   TYPES
-========================================================= */
-
-type Booking = {
-  id: string
-  name: string
-  phone: string
-  date: string
-  time: string
-  guests: number
-  status: string
-}
+/* ==========================================
+   ZEN CAFÉ — ADMIN DASHBOARD
+========================================== */
 
 type Props = {
   onNavigate: (page: AdminPage) => void
@@ -62,25 +60,22 @@ type Props = {
 
 type ProductKind = 'all' | 'food' | 'drink'
 
-type ApiRecord = Record<string, unknown>
-
-/* =========================================================
+/* ==========================================
    CONFIGURATION
-========================================================= */
+========================================== */
 
-const FALLBACK_IMAGE = '/assets/menu-panda-main.png'
+const FALLBACK_IMAGE =
+  '/assets/menu-panda-main.png'
 
 const REFRESH_INTERVAL_MS = 30_000
 
-const BOOKING_ENDPOINT = '/api/admin/bookings'
-
-/* =========================================================
-   HELPERS
-========================================================= */
+/* ==========================================
+   IMAGE HELPERS
+========================================== */
 
 function fallbackImage(
   event: SyntheticEvent<HTMLImageElement>,
-) {
+): void {
   const image = event.currentTarget
 
   if (!image.src.endsWith(FALLBACK_IMAGE)) {
@@ -88,388 +83,473 @@ function fallbackImage(
   }
 }
 
-function productImage(image?: string) {
-  if (!image || image.startsWith('zen-menu-media:')) {
+function productImage(
+  image?: string,
+): string {
+  if (
+    !image ||
+    image.startsWith('zen-menu-media:')
+  ) {
     return FALLBACK_IMAGE
   }
 
   return image
 }
 
-function bookingStatusClass(status: string) {
-  const normalized = status.toLowerCase()
+/* ==========================================
+   BOOKING DISPLAY HELPERS
+========================================== */
 
-  if (
-    normalized === 'confirmed' ||
-    normalized === 'accepted'
-  ) {
-    return 'za-pill-green'
-  }
-
-  if (
-    normalized === 'rejected' ||
-    normalized === 'cancelled'
-  ) {
-    return 'za-pill-gray'
-  }
-
-  return 'za-pill-amber'
-}
-
-function toRecord(value: unknown): ApiRecord | null {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value)
-  ) {
-    return null
-  }
-
-  return value as ApiRecord
-}
-
-function toStringValue(value: unknown): string {
-  if (typeof value === 'string') return value
-
-  if (typeof value === 'number') {
-    return String(value)
-  }
-
-  return ''
-}
-
-function toNumberValue(value: unknown): number {
-  const number = Number(value)
-
-  return Number.isFinite(number) ? number : 0
-}
-
-function firstString(
-  record: ApiRecord,
-  keys: string[],
+function bookingStatusClass(
+  status: BookingStatus,
 ): string {
-  for (const key of keys) {
-    const value = toStringValue(record[key])
+  switch (status) {
+    case 'confirmed':
+    case 'completed':
+      return 'za-pill-green'
 
-    if (value) return value
+    case 'rejected':
+    case 'cancelled':
+      return 'za-pill-gray'
+
+    case 'pending':
+    case 'modification_proposed':
+    default:
+      return 'za-pill-amber'
   }
-
-  return ''
 }
 
-function normalizeBooking(value: unknown): Booking | null {
-  const booking = toRecord(value)
+function bookingStatusLabel(
+  status: BookingStatus,
+): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
 
-  if (!booking) return null
+    case 'confirmed':
+      return 'Confirmed'
 
-  const id = firstString(booking, [
-    'id',
-    'bookingId',
-    'booking_id',
-  ])
+    case 'rejected':
+      return 'Rejected'
 
-  if (!id) return null
+    case 'modification_proposed':
+      return 'Modification Proposed'
 
-  const name = firstString(booking, [
-    'customerName',
-    'customer_name',
-    'name',
-  ])
+    case 'cancelled':
+      return 'Cancelled'
 
-  const phone = firstString(booking, [
-    'customerPhone',
-    'customer_phone',
-    'phone',
-  ])
+    case 'completed':
+      return 'Completed'
 
-  const date = firstString(booking, [
-    'date',
-    'bookingDate',
-    'booking_date',
-  ])
+    default:
+      return status
+  }
+}
 
-  const time = firstString(booking, [
-    'time',
-    'startTime',
-    'start_time',
-  ])
+function formatBookingDate(
+  value: string,
+): string {
+  if (!value) {
+    return '—'
+  }
 
-  const status = firstString(booking, ['status'])
-
-  const guests = toNumberValue(
-    booking.guests ??
-      booking.guestCount ??
-      booking.guest_count,
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})$/,
   )
 
-  return {
-    id,
-    name: name || 'Customer',
-    phone,
-    date,
-    time,
-    guests,
-    status: status || 'pending',
-  }
-}
-
-function extractBookings(payload: unknown): Booking[] {
-  if (Array.isArray(payload)) {
-    return payload
-      .map(normalizeBooking)
-      .filter(
-        (item): item is Booking => item !== null,
-      )
+  if (!match) {
+    return value
   }
 
-  const response = toRecord(payload)
+  const [, year, month, day] = match
 
-  if (!response) {
-    throw new Error('Invalid bookings API response.')
-  }
-
-  if (response.success === false) {
-    throw new Error(
-      toStringValue(response.error) ||
-        'Unable to load bookings.',
-    )
-  }
-
-  const data = toRecord(response.data)
-
-  const candidates = [
-    response.bookings,
-    response.items,
-    response.results,
-    data?.bookings,
-    data?.items,
-    data?.results,
-    response.data,
-  ]
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate
-        .map(normalizeBooking)
-        .filter(
-          (item): item is Booking => item !== null,
-        )
-    }
-  }
-
-  throw new Error(
-    'Bookings response does not contain a booking list.',
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
   )
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleDateString('en-LK', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
-/* =========================================================
-   DASHBOARD
-========================================================= */
+function formatBookingTime(
+  value: string,
+): string {
+  if (!value) {
+    return '—'
+  }
+
+  const match = value.match(
+    /^(\d{1,2}):(\d{2})/,
+  )
+
+  if (!match) {
+    return value
+  }
+
+  const hours = Number(match[1])
+  const minutes = match[2]
+
+  if (
+    !Number.isInteger(hours) ||
+    hours < 0 ||
+    hours > 23
+  ) {
+    return value
+  }
+
+  const period =
+    hours >= 12 ? 'PM' : 'AM'
+
+  const displayHours =
+    hours % 12 || 12
+
+  return `${displayHours}:${minutes} ${period}`
+}
+
+function getErrorMessage(
+  error: unknown,
+  fallback: string,
+): string {
+  if (
+    error instanceof Error &&
+    error.message.trim()
+  ) {
+    return error.message
+  }
+
+  return fallback
+}
+
+/* ==========================================
+   MAIN DASHBOARD COMPONENT
+========================================== */
 
 export default function Dashboard({
   onNavigate,
   query,
 }: Props) {
-  const [products, setProducts] = useState<MenuItem[]>(
-    () => readMenuCatalog(),
-  )
+  /* ========================================
+     STATE
+  ======================================== */
 
-  const [offers, setOffers] = useState<ZenOffer[]>(
-    () => readOffers(),
-  )
+  const [products, setProducts] =
+    useState<MenuItem[]>(
+      () => readMenuCatalog(),
+    )
 
-  const [bookings, setBookings] = useState<Booking[]>([])
+  const [offers, setOffers] =
+    useState<ZenOffer[]>(
+      () => readOffers(),
+    )
 
-  const [kind, setKind] = useState<ProductKind>('all')
+  const [bookings, setBookings] =
+    useState<RoomBooking[]>([])
 
-  const [productSearch, setProductSearch] = useState('')
+  const [bookingsLoaded, setBookingsLoaded] =
+    useState(false)
 
-  const [refreshing, setRefreshing] = useState(false)
+  const [kind, setKind] =
+    useState<ProductKind>('all')
 
-  const [bookingError, setBookingError] = useState('')
+  const [productSearch, setProductSearch] =
+    useState('')
 
-  const [offerError, setOfferError] = useState('')
+  const [refreshing, setRefreshing] =
+    useState(false)
+
+  const [bookingError, setBookingError] =
+    useState('')
+
+  const [offerError, setOfferError] =
+    useState('')
+
+  const [productError, setProductError] =
+    useState('')
+
+  /* ========================================
+     REFRESH CONTROL
+
+     Prevent overlapping dashboard refreshes.
+  ======================================== */
 
   const mountedRef = useRef(false)
 
-  const refreshInProgressRef = useRef(false)
+  const refreshInProgressRef =
+    useRef(false)
 
-  /* =======================================================
-     SYNCHRONIZE SHARED STORES
-  ======================================================= */
+  const refreshQueuedRef =
+    useRef(false)
+
+  const refreshGenerationRef =
+    useRef(0)
+
+  /* ========================================
+     SYNCHRONIZE MENU AND OFFERS
+  ======================================== */
 
   const syncCatalog = useCallback(() => {
+    if (!mountedRef.current) {
+      return
+    }
+
     setProducts(readMenuCatalog())
     setOffers(readOffers())
   }, [])
 
-  /* =======================================================
-     FETCH BOOKINGS FROM LIVE API
-  ======================================================= */
+  /* ========================================
+     SYNCHRONIZE BOOKING CACHE
 
-  const loadBookings = useCallback(async () => {
-    const response = await fetch(BOOKING_ENDPOINT, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    })
+     The booking store is the single source
+     of truth for the frontend booking cache.
+  ======================================== */
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error(
-          'Admin session expired. Please sign in again.',
-        )
+  const syncBookings = useCallback(() => {
+    if (!mountedRef.current) {
+      return
+    }
+
+    if (bookingsLoaded) {
+      setBookings(readRoomBookings())
+    }
+  }, [bookingsLoaded])
+
+  /* ========================================
+     REFRESH DASHBOARD DATA
+
+     IMPORTANT:
+
+     Room bookings must be loaded using
+     loadAdminBookings() from bookingStore.ts.
+
+     Do not request /api/admin/bookings.
+
+     bookingStore.ts already handles:
+     - GET /api/bookings
+     - Admin authentication headers
+     - PostgreSQL response normalization
+     - Sorting
+     - Booking cache synchronization
+  ======================================== */
+
+  const refreshDashboard =
+    useCallback(async (): Promise<void> => {
+      if (refreshInProgressRef.current) {
+        refreshQueuedRef.current = true
+        return
       }
 
-      if (response.status === 403) {
-        throw new Error(
-          'You do not have permission to view bookings.',
-        )
+      refreshInProgressRef.current = true
+
+      const generation =
+        refreshGenerationRef.current
+
+      if (mountedRef.current) {
+        setRefreshing(true)
       }
 
-      throw new Error(
-        `Unable to load bookings (HTTP ${response.status}).`,
-      )
-    }
+      try {
+        syncCatalog()
 
-    const payload: unknown = await response.json()
+        const [
+          productsResult,
+          offersResult,
+          bookingsResult,
+        ] = await Promise.allSettled([
+          refreshMenuCatalog({
+            all: true,
+            force: true,
+          }),
 
-    return extractBookings(payload)
-  }, [])
+          refreshOffers(true),
 
-  /* =======================================================
-     REFRESH DASHBOARD
+          // Correct shared booking service.
+          loadAdminBookings(),
+        ])
 
-     Offers and bookings refresh independently.
-     A failure in one does not block the other.
-  ======================================================= */
+        if (
+          !mountedRef.current ||
+          generation !==
+            refreshGenerationRef.current
+        ) {
+          return
+        }
 
- const refreshDashboard = useCallback(async () => {
-  if (refreshInProgressRef.current) return
+        /* ==================================
+           PRODUCTS
+        ================================== */
 
-  refreshInProgressRef.current = true
+        if (
+          productsResult.status ===
+          'fulfilled'
+        ) {
+          setProducts(productsResult.value)
+          setProductError('')
+        } else {
+          const message = getErrorMessage(
+            productsResult.reason,
+            'Unable to synchronize products.',
+          )
 
-  if (mountedRef.current) {
-    setRefreshing(true)
-  }
+          setProductError(message)
 
-  try {
-    syncCatalog()
+          console.error(
+            '[Zen Café Dashboard] Products:',
+            productsResult.reason,
+          )
+        }
 
-    // Fetch products, offers and bookings independently.
-    const [
-      productsResult,
-      offersResult,
-      bookingsResult,
-    ] = await Promise.allSettled([
-      refreshMenuCatalog({
-        all: true,
-        force: true,
-      }),
-      refreshOffers(true),
-      loadBookings(),
-    ])
+        /* ==================================
+           OFFERS
+        ================================== */
 
-    if (!mountedRef.current) return
+        if (
+          offersResult.status ===
+          'fulfilled'
+        ) {
+          setOffers(offersResult.value)
+          setOfferError('')
+        } else {
+          const message = getErrorMessage(
+            offersResult.reason,
+            'Unable to synchronize offers.',
+          )
 
-    // PRODUCTS
-    if (productsResult.status === 'fulfilled') {
-      setProducts(productsResult.value)
-    } else {
-      console.error(
-        '[Zen Dashboard] Products refresh failed:',
-        productsResult.reason,
-      )
-    }
+          setOfferError(message)
 
-    // OFFERS
-    if (offersResult.status === 'fulfilled') {
-      setOffers(offersResult.value)
-      setOfferError('')
-    } else {
-      const message =
-        offersResult.reason instanceof Error
-          ? offersResult.reason.message
-          : 'Unable to synchronize offers.'
+          console.error(
+            '[Zen Café Dashboard] Offers:',
+            offersResult.reason,
+          )
+        }
 
-      setOfferError(message)
+        /* ==================================
+           ROOM BOOKINGS
+        ================================== */
 
-      console.error(
-        '[Zen Dashboard] Offers refresh failed:',
-        offersResult.reason,
-      )
-    }
+        if (
+          bookingsResult.status ===
+          'fulfilled'
+        ) {
+          setBookings(bookingsResult.value)
 
-    // BOOKINGS
-    if (bookingsResult.status === 'fulfilled') {
-      setBookings(bookingsResult.value)
-      setBookingError('')
-    } else {
-      const message =
-        bookingsResult.reason instanceof Error
-          ? bookingsResult.reason.message
-          : 'Unable to synchronize bookings.'
+          setBookingsLoaded(true)
+          setBookingError('')
+        } else {
+          const message = getErrorMessage(
+            bookingsResult.reason,
+            'Unable to load room bookings.',
+          )
 
-      setBookingError(message)
+          setBookingError(message)
 
-      console.error(
-        '[Zen Dashboard] Bookings refresh failed:',
-        bookingsResult.reason,
-      )
-    }
-  } finally {
-    refreshInProgressRef.current = false
+          console.error(
+            '[Zen Café Dashboard] Bookings:',
+            bookingsResult.reason,
+          )
+        }
+      } finally {
+        refreshInProgressRef.current = false
 
-    if (mountedRef.current) {
-      setRefreshing(false)
-    }
-  }
-}, [loadBookings, syncCatalog])
-  /* =======================================================
-     LIVE SYNCHRONIZATION
+        if (
+          mountedRef.current &&
+          generation ===
+            refreshGenerationRef.current
+        ) {
+          setRefreshing(false)
 
-     Refresh when:
-     - Dashboard opens
-     - Browser regains focus
-     - Tab becomes visible
-     - Another tab changes storage
-     - 30-second refresh interval runs
-  ======================================================= */
+          if (refreshQueuedRef.current) {
+            refreshQueuedRef.current = false
+
+            void refreshDashboard()
+          }
+        }
+      }
+    }, [syncCatalog])
+
+  /* ========================================
+     LIVE STORE SUBSCRIPTIONS
+  ======================================== */
 
   useEffect(() => {
     mountedRef.current = true
 
-    const stopMenu = subscribeMenuCatalog(() => {
-      if (mountedRef.current) {
-        setProducts(readMenuCatalog())
-      }
-    })
+    refreshGenerationRef.current += 1
 
-    const stopOffers = subscribeOffers(() => {
-      if (mountedRef.current) {
+    /* MENU UPDATES */
+
+    const stopMenu =
+      subscribeMenuCatalog(() => {
+        if (!mountedRef.current) {
+          return
+        }
+
+        setProducts(readMenuCatalog())
+      })
+
+    /* OFFER UPDATES */
+
+    const stopOffers =
+      subscribeOffers(() => {
+        if (!mountedRef.current) {
+          return
+        }
+
         setOffers(readOffers())
-      }
-    })
+      })
+
+    /* BOOKING UPDATES */
+
+    const stopBookings =
+      subscribeRoomBookings(() => {
+        if (!mountedRef.current) {
+          return
+        }
+
+        setBookings(readRoomBookings())
+        setBookingsLoaded(true)
+      })
+
+    /* WINDOW FOCUS */
 
     const handleFocus = () => {
-      void refreshDashboard()
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState ===
+        'visible'
+      ) {
         void refreshDashboard()
       }
     }
 
-    const handleStorage = () => {
-      syncCatalog()
-      void refreshDashboard()
+    /* TAB VISIBILITY */
+
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState ===
+        'visible'
+      ) {
+        void refreshDashboard()
+      }
     }
 
-    window.addEventListener('focus', handleFocus)
+    /* BROWSER STORAGE */
+
+    const handleStorage = () => {
+      syncCatalog()
+    }
+
+    window.addEventListener(
+      'focus',
+      handleFocus,
+    )
 
     window.addEventListener(
       'storage',
@@ -481,19 +561,36 @@ export default function Dashboard({
       handleVisibilityChange,
     )
 
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void refreshDashboard()
-      }
-    }, REFRESH_INTERVAL_MS)
+    /* PERIODIC REFRESH */
+
+    const interval = window.setInterval(
+      () => {
+        if (
+          document.visibilityState ===
+          'visible'
+        ) {
+          void refreshDashboard()
+        }
+      },
+      REFRESH_INTERVAL_MS,
+    )
+
+    /* INITIAL LOAD */
 
     void refreshDashboard()
+
+    /* CLEANUP */
 
     return () => {
       mountedRef.current = false
 
+      refreshGenerationRef.current += 1
+
+      refreshQueuedRef.current = false
+
       stopMenu()
       stopOffers()
+      stopBookings()
 
       window.removeEventListener(
         'focus',
@@ -514,24 +611,34 @@ export default function Dashboard({
     }
   }, [refreshDashboard, syncCatalog])
 
-  /* =======================================================
-     FILTERS
-  ======================================================= */
+  /* ========================================
+     SEARCH FILTERS
+  ======================================== */
 
-  const globalTerm = query.trim().toLowerCase()
+  const globalTerm =
+    query.trim().toLowerCase()
 
-  const localTerm = productSearch.trim().toLowerCase()
+  const localTerm =
+    productSearch.trim().toLowerCase()
+
+  /* ========================================
+     FILTER PRODUCTS
+  ======================================== */
 
   const filteredProducts = useMemo(() => {
     return products
-      .filter((product) => {
+      .filter(product => {
         const matchesKind =
-          kind === 'all' || product.kind === kind
+          kind === 'all' ||
+          product.kind === kind
 
-        const searchableText =
-          `${product.name} ${product.category} ${
-            product.description || ''
-          }`.toLowerCase()
+        const searchableText = [
+          product.name,
+          product.category,
+          product.description || '',
+        ]
+          .join(' ')
+          .toLowerCase()
 
         const matchesGlobal =
           !globalTerm ||
@@ -555,50 +662,81 @@ export default function Dashboard({
     localTerm,
   ])
 
+  /* ========================================
+     FILTER OFFERS
+  ======================================== */
+
   const filteredOffers = useMemo(() => {
     return offers
-      .filter((offer) =>
-        `${offer.title} ${offer.subtitle || ''}`
+      .filter(offer => {
+        const searchableText = [
+          offer.title,
+          offer.subtitle || '',
+          offer.description || '',
+        ]
+          .join(' ')
           .toLowerCase()
-          .includes(globalTerm),
-      )
+
+        return (
+          !globalTerm ||
+          searchableText.includes(globalTerm)
+        )
+      })
       .slice(0, 5)
   }, [offers, globalTerm])
 
+  /* ========================================
+     FILTER BOOKINGS
+  ======================================== */
+
   const filteredBookings = useMemo(() => {
     return bookings
-      .filter((booking) =>
-        `${booking.name} ${booking.phone} ${
-          booking.date
-        }`
+      .filter(booking => {
+        const searchableText = [
+          booking.customerName,
+          booking.email,
+          booking.phone,
+          booking.roomName,
+          booking.bookingDate,
+          booking.bookingTime,
+          booking.status,
+        ]
+          .join(' ')
           .toLowerCase()
-          .includes(globalTerm),
-      )
+
+        return (
+          !globalTerm ||
+          searchableText.includes(globalTerm)
+        )
+      })
       .slice(0, 5)
   }, [bookings, globalTerm])
 
-  /* =======================================================
+  /* ========================================
      DASHBOARD STATISTICS
-  ======================================================= */
+  ======================================== */
 
   const totalProducts = products.length
 
   const activeOffers = useMemo(() => {
     return offers.filter(
-      (offer) => isOfferCurrentlyActive(offer),
+      offer =>
+        isOfferCurrentlyActive(offer),
     ).length
   }, [offers])
 
   const totalBookings = bookings.length
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
+  /* ========================================
+     RENDER DASHBOARD
+  ======================================== */
 
   return (
     <div className="za-dashboard">
 
-      {/* HERO BANNER */}
+      {/* ====================================
+          HERO BANNER
+      ==================================== */}
 
       <section className="za-hero">
         <div className="za-hero-copy">
@@ -619,8 +757,8 @@ export default function Dashboard({
           </h1>
 
           <p className="za-hero-description">
-            Manage your menu, offers and room bookings
-            with ease.
+            Manage your menu, offers and room
+            bookings with ease.
           </p>
         </div>
 
@@ -631,6 +769,7 @@ export default function Dashboard({
           <div className="za-hero-handwriting">
             <span>Great Food</span>
             <span>Happier</span>
+
             <span>
               Moments <b>♥</b>
             </span>
@@ -638,7 +777,9 @@ export default function Dashboard({
         </div>
       </section>
 
-      {/* SUMMARY CARDS */}
+      {/* ====================================
+          SUMMARY CARDS
+      ==================================== */}
 
       <section
         className="za-stats"
@@ -647,48 +788,77 @@ export default function Dashboard({
         <StatCard
           title="MENU ITEMS"
           value={totalProducts}
-          subtitle="Total products"
+          subtitle={
+            productError
+              ? 'Last loaded products'
+              : 'Total products'
+          }
           icon={UtensilsCrossed}
           tone="rose"
-          onClick={() => onNavigate('products')}
+          onClick={() =>
+            onNavigate('products')
+          }
         />
 
         <StatCard
           title="ACTIVE OFFERS"
           value={activeOffers}
-          subtitle="Live promotions"
+          subtitle={
+            offerError
+              ? 'Last loaded offers'
+              : 'Live promotions'
+          }
           icon={Tags}
           tone="amber"
-          onClick={() => onNavigate('offers')}
+          onClick={() =>
+            onNavigate('offers')
+          }
         />
 
         <StatCard
           title="ROOM BOOKINGS"
           value={totalBookings}
-          subtitle="Total requests"
+          subtitle={
+            bookingError
+              ? bookingsLoaded
+                ? 'Last loaded requests'
+                : 'Bookings unavailable'
+              : bookingsLoaded
+                ? 'Total requests'
+                : 'Loading requests'
+          }
           icon={CalendarDays}
           tone="green"
-          onClick={() => onNavigate('bookings')}
+          onClick={() =>
+            onNavigate('bookings')
+          }
         />
       </section>
 
-      {/* MANAGEMENT OVERVIEW */}
+      {/* ====================================
+          MANAGEMENT PANELS
+      ==================================== */}
 
       <section className="za-panels">
 
-        {/* MENU PRODUCTS */}
+        {/* ==================================
+            MENU / PRODUCTS
+        ================================== */}
 
         <article className="za-panel za-products-panel">
           <div className="za-panel-head">
             <div className="za-panel-heading">
               <h2>
                 <UtensilsCrossed />
-                <span>Menu / Products</span>
+
+                <span>
+                  Menu / Products
+                </span>
               </h2>
 
               <p>
-                Add, edit and manage your food and drink
-                items.
+                Add, edit and manage your food
+                and drink items.
               </p>
             </div>
 
@@ -715,15 +885,21 @@ export default function Dashboard({
                   'food',
                   'drink',
                 ] as const
-              ).map((value) => (
+              ).map(value => (
                 <button
                   key={value}
                   type="button"
                   className={
-                    kind === value ? 'active' : ''
+                    kind === value
+                      ? 'active'
+                      : ''
                   }
-                  onClick={() => setKind(value)}
-                  aria-pressed={kind === value}
+                  onClick={() =>
+                    setKind(value)
+                  }
+                  aria-pressed={
+                    kind === value
+                  }
                 >
                   {value === 'all'
                     ? 'All'
@@ -740,8 +916,10 @@ export default function Dashboard({
               <input
                 type="search"
                 value={productSearch}
-                onChange={(event) =>
-                  setProductSearch(event.target.value)
+                onChange={event =>
+                  setProductSearch(
+                    event.target.value,
+                  )
                 }
                 placeholder="Search products..."
                 aria-label="Search products"
@@ -763,79 +941,89 @@ export default function Dashboard({
               </thead>
 
               <tbody>
-                {filteredProducts.map((product) => (
-                  <tr key={product.id}>
-                    <td>
-                      <img
-                        className="za-thumb"
-                        src={productImage(
-                          product.image,
-                        )}
-                        alt={product.name}
-                        onError={fallbackImage}
-                      />
-                    </td>
-
-                    <td className="za-product-name">
-                      <strong>{product.name}</strong>
-
-                      <small>
-                        {product.description ||
-                          'Menu item'}
-                      </small>
-                    </td>
-
-                    <td>
-                      {product.category}
-                    </td>
-
-                    <td className="za-price">
-                      —
-                    </td>
-
-                    <td>
-                      <span
-                        className={`za-pill ${
-                          product.available
-                            ? 'za-pill-green'
-                            : 'za-pill-gray'
-                        }`}
-                      >
-                        {product.available
-                          ? 'Active'
-                          : 'Hidden'}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div className="za-table-actions">
-                        <button
-                          type="button"
-                          className="za-row-action"
-                          title="Manage product"
-                          aria-label={`Manage ${product.name}`}
-                          onClick={() =>
-                            onNavigate('products')
+                {filteredProducts.map(
+                  product => (
+                    <tr key={product.id}>
+                      <td>
+                        <img
+                          className="za-thumb"
+                          src={productImage(
+                            product.image,
+                          )}
+                          alt={product.name}
+                          onError={
+                            fallbackImage
                           }
-                        >
-                          <Pencil size={15} />
-                        </button>
+                        />
+                      </td>
 
-                        <button
-                          type="button"
-                          className="za-row-action za-delete"
-                          title="Manage product deletion"
-                          aria-label={`Manage deletion of ${product.name}`}
-                          onClick={() =>
-                            onNavigate('products')
-                          }
+                      <td className="za-product-name">
+                        <strong>
+                          {product.name}
+                        </strong>
+
+                        <small>
+                          {product.description ||
+                            'Menu item'}
+                        </small>
+                      </td>
+
+                      <td>
+                        {product.category}
+                      </td>
+
+                      <td className="za-price">
+                        —
+                      </td>
+
+                      <td>
+                        <span
+                          className={`za-pill ${
+                            product.available
+                              ? 'za-pill-green'
+                              : 'za-pill-gray'
+                          }`}
                         >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {product.available
+                            ? 'Active'
+                            : 'Hidden'}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div className="za-table-actions">
+                          <button
+                            type="button"
+                            className="za-row-action"
+                            title="Manage product"
+                            aria-label={`Manage ${product.name}`}
+                            onClick={() =>
+                              onNavigate(
+                                'products',
+                              )
+                            }
+                          >
+                            <Pencil size={15} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="za-row-action za-delete"
+                            title="Manage product deletion"
+                            aria-label={`Manage deletion of ${product.name}`}
+                            onClick={() =>
+                              onNavigate(
+                                'products',
+                              )
+                            }
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
 
@@ -845,15 +1033,28 @@ export default function Dashboard({
               </p>
             )}
           </div>
+
+          {productError && (
+            <p
+              className="za-empty"
+              role="alert"
+            >
+              Products synchronization error:{' '}
+              {productError}
+            </p>
+          )}
         </article>
 
-        {/* OFFERS */}
+        {/* ==================================
+            OFFERS & PROMOTIONS
+        ================================== */}
 
         <article className="za-panel za-offers-panel">
           <div className="za-panel-head">
             <div className="za-panel-heading">
               <h2>
                 <Tags />
+
                 <span>
                   Offers &amp; Promotions
                 </span>
@@ -877,55 +1078,66 @@ export default function Dashboard({
           </div>
 
           <div className="za-offer-list">
-            {filteredOffers.map((offer) => (
-              <div
-                className="za-offer"
-                key={offer.id}
-              >
-                <img
-                  src={
-                    offer.image ||
-                    FALLBACK_IMAGE
-                  }
-                  alt={offer.title}
-                  onError={fallbackImage}
-                />
+            {filteredOffers.map(offer => {
+              const isActive =
+                isOfferCurrentlyActive(
+                  offer,
+                )
 
-                <div className="za-offer-details">
-                  <strong>
-                    {offer.title}
-                  </strong>
+              return (
+                <div
+                  className="za-offer"
+                  key={offer.id}
+                >
+                  <img
+                    src={
+                      offer.image ||
+                      FALLBACK_IMAGE
+                    }
+                    alt={offer.title}
+                    onError={
+                      fallbackImage
+                    }
+                  />
 
-                  <small>
-                    {offer.subtitle ||
-                      'Special café offer'}
-                  </small>
+                  <div className="za-offer-details">
+                    <strong>
+                      {offer.title}
+                    </strong>
+
+                    <small>
+                      {offer.subtitle ||
+                        'Special café offer'}
+                    </small>
+                  </div>
+
+                  <span
+                    className={`za-pill ${
+                      isActive
+                        ? 'za-pill-green'
+                        : 'za-pill-gray'
+                    }`}
+                  >
+                    {isActive
+                      ? 'Active'
+                      : 'Inactive'}
+                  </span>
+
+                  <button
+                    type="button"
+                    className="za-offer-more"
+                    aria-label={`Manage ${offer.title}`}
+                    onClick={() =>
+                      onNavigate('offers')
+                    }
+                  >
+                    <MoreHorizontal
+                      size={19}
+                    />
+                  </button>
                 </div>
-
-                <span
-                  className={`za-pill ${
-                    isOfferCurrentlyActive(offer)
-                      ? 'za-pill-green'
-                      : 'za-pill-gray'
-                  }`}
-                >
-                  {isOfferCurrentlyActive(offer)
-                    ? 'Active'
-                    : 'Inactive'}
-                </span>
-
-                <button
-                  type="button"
-                  className="za-offer-more"
-                  aria-label={`Manage ${offer.title}`}
-                  onClick={() =>
-                    onNavigate('offers')
-                  }
-                >
-                  <MoreHorizontal size={19} />
-                </button>
-              </div>
-            ))}
+              )
+            })}
 
             {filteredOffers.length === 0 && (
               <p className="za-empty">
@@ -939,23 +1151,30 @@ export default function Dashboard({
               className="za-empty"
               role="alert"
             >
-              Offers synchronization error: {offerError}
+              Offers synchronization error:{' '}
+              {offerError}
             </p>
           )}
         </article>
 
-        {/* ROOM BOOKINGS */}
+        {/* ==================================
+            ROOM BOOKINGS
+        ================================== */}
 
         <article className="za-panel za-bookings-panel">
           <div className="za-panel-head">
             <div className="za-panel-heading">
               <h2>
                 <CalendarDays />
-                <span>Room Bookings</span>
+
+                <span>
+                  Room Bookings
+                </span>
               </h2>
 
               <p>
-                View and manage room booking requests.
+                View and manage room booking
+                requests.
               </p>
             </div>
 
@@ -980,14 +1199,48 @@ export default function Dashboard({
             </button>
           </div>
 
+          {/* ==================================
+              BOOKING ERROR MESSAGE
+          ================================== */}
+
           {bookingError && (
-            <p
+            <div
               className="za-empty"
               role="alert"
             >
-              {bookingError}
-            </p>
+              <p>
+                {bookingError}
+              </p>
+
+              <button
+                type="button"
+                className="za-view-all"
+                disabled={refreshing}
+                onClick={() => {
+                  void refreshDashboard()
+                }}
+              >
+                <span>
+                  {refreshing
+                    ? 'Retrying...'
+                    : 'Retry Loading Bookings'}
+                </span>
+
+                <RefreshCw
+                  size={16}
+                  className={
+                    refreshing
+                      ? 'animate-spin'
+                      : ''
+                  }
+                />
+              </button>
+            </div>
           )}
+
+          {/* ==================================
+              BOOKING TABLE
+          ================================== */}
 
           <div className="za-table-wrap">
             <table className="za-table za-bookings-table">
@@ -1002,67 +1255,95 @@ export default function Dashboard({
               </thead>
 
               <tbody>
-                {filteredBookings.map((booking) => (
-                  <tr key={booking.id}>
-                    <td>
-                      <strong>
-                        {booking.name}
-                      </strong>
+                {filteredBookings.map(
+                  booking => (
+                    <tr key={booking.id}>
+                      <td>
+                        <strong>
+                          {booking.customerName ||
+                            'Customer'}
+                        </strong>
 
-                      <small>
-                        {booking.phone || '—'}
-                      </small>
-                    </td>
+                        <small>
+                          {booking.phone ||
+                            '—'}
+                        </small>
+                      </td>
 
-                    <td>
-                      <strong>
-                        {booking.date || '—'}
-                      </strong>
+                      <td>
+                        <strong>
+                          {formatBookingDate(
+                            booking.bookingDate,
+                          )}
+                        </strong>
 
-                      <small>
-                        {booking.time || '—'}
-                      </small>
-                    </td>
+                        <small>
+                          {formatBookingTime(
+                            booking.bookingTime ||
+                              booking.startTime ||
+                              '',
+                          )}
+                        </small>
+                      </td>
 
-                    <td>
-                      {booking.guests}
-                    </td>
+                      <td>
+                        {booking.guests}
+                      </td>
 
-                    <td>
-                      <span
-                        className={`za-pill ${bookingStatusClass(
-                          booking.status,
-                        )}`}
-                      >
-                        {booking.status}
-                      </span>
-                    </td>
+                      <td>
+                        <span
+                          className={`za-pill ${bookingStatusClass(
+                            booking.status,
+                          )}`}
+                        >
+                          {bookingStatusLabel(
+                            booking.status,
+                          )}
+                        </span>
+                      </td>
 
-                    <td>
-                      <button
-                        type="button"
-                        className="za-row-action za-view-booking"
-                        title="View booking"
-                        aria-label={`View booking for ${booking.name}`}
-                        onClick={() =>
-                          onNavigate('bookings')
-                        }
-                      >
-                        <Eye size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      <td>
+                        <button
+                          type="button"
+                          className="za-row-action za-view-booking"
+                          title="View booking"
+                          aria-label={`View booking for ${booking.customerName}`}
+                          onClick={() =>
+                            onNavigate(
+                              'bookings',
+                            )
+                          }
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
 
             {filteredBookings.length === 0 &&
-              !bookingError && (
+              !bookingError &&
+              !refreshing &&
+              bookingsLoaded && (
                 <p className="za-empty">
                   No booking requests found.
                 </p>
               )}
+
+            {filteredBookings.length === 0 &&
+              !bookingError &&
+              !bookingsLoaded && (
+                <p className="za-empty">
+                  Loading room bookings...
+                </p>
+              )}
           </div>
+
+          {/* ==================================
+              VIEW ALL BOOKINGS
+          ================================== */}
 
           <button
             type="button"
@@ -1075,7 +1356,9 @@ export default function Dashboard({
               View All Bookings
             </span>
 
-            <ChevronRight size={18} />
+            <ChevronRight
+              size={18}
+            />
           </button>
         </article>
       </section>

@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import AdminLayout from './components/AdminLayout'
 
@@ -39,95 +39,99 @@ export default function AdminApp() {
      STATE
   ========================================== */
 
-  // Currently selected admin page
-  const [page, setPage] =
-    useState<AdminPage>('dashboard')
+  const [page, setPage] = useState<AdminPage>(
+    'dashboard'
+  )
 
-  // Global header search
-  const [query, setQuery] =
-    useState<string>('')
+  const [query, setQuery] = useState<string>('')
 
-  // Selected settings tab
   const [settingsTab, setSettingsTab] =
     useState<SettingsTab>('general')
+
+  /* ==========================================
+     SCROLL HELPER
+  ========================================== */
+
+  const scrollToTop = useCallback((): void => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'instant',
+    })
+  }, [])
 
   /* ==========================================
      PAGE NAVIGATION
   ========================================== */
 
-  const navigate = (
-    nextPage: AdminPage
-  ): void => {
-    // Update active page
-    setPage(nextPage)
+  const navigate = useCallback(
+    (nextPage: AdminPage): void => {
+      setPage(nextPage)
 
-    // Clear previous search
-    setQuery('')
+      // Clear the previous section's search.
+      setQuery('')
 
-    // Open Café Information when
-    // navigating to Settings normally
-    if (nextPage === 'settings') {
-      setSettingsTab('general')
-    }
+      // Normal Settings navigation opens
+      // Café Information by default.
+      if (nextPage === 'settings') {
+        setSettingsTab('general')
+      }
 
-    // Scroll to top after navigation
-    window.scrollTo({
-      top: 0,
-      behavior: 'instant',
-    })
-  }
+      scrollToTop()
+    },
+    [scrollToTop]
+  )
 
   /* ==========================================
      OPEN SETTINGS FROM PROFILE MENU
   ========================================== */
 
-  const openSettings = (
-    tab: 'profile' | 'security'
-  ): void => {
-    setSettingsTab(tab)
+  const openSettings = useCallback(
+    (tab: 'profile' | 'security'): void => {
+      // Preserve the requested Settings tab.
+      setSettingsTab(tab)
 
-    setPage('settings')
+      setPage('settings')
+      setQuery('')
 
-    setQuery('')
-
-    window.scrollTo({
-      top: 0,
-      behavior: 'instant',
-    })
-  }
+      scrollToTop()
+    },
+    [scrollToTop]
+  )
 
   /* ==========================================
      SWEETALERT LOGOUT CONFIRMATION
   ========================================== */
 
-  const confirmLogout = async (
-    performLogout: () => void | Promise<void>
-  ): Promise<void> => {
-    const confirmed =
-      await AdminAlert.confirm(
+  const confirmLogout = useCallback(
+    async (
+      performLogout: () => void | Promise<void>
+    ): Promise<void> => {
+      const confirmed = await AdminAlert.confirm(
         'Logout Confirmation',
         'Are you sure you want to log out of Zen Café Admin?',
         'Yes, Logout'
       )
 
-    if (!confirmed) {
-      return
-    }
+      if (!confirmed) {
+        return
+      }
 
-    try {
-      await performLogout()
-    } catch (error) {
-      console.error(
-        'Admin logout failed:',
-        error
-      )
+      try {
+        await performLogout()
+      } catch (error) {
+        console.error(
+          'Admin logout failed:',
+          error
+        )
 
-      await AdminAlert.error(
-        'Logout Failed',
-        'Unable to log out. Please try again.'
-      )
-    }
-  }
+        await AdminAlert.error(
+          'Logout Failed',
+          'Unable to log out. Please try again.'
+        )
+      }
+    },
+    []
+  )
 
   /* ==========================================
      PAGE RENDERING
@@ -148,7 +152,7 @@ export default function AdminApp() {
         )
 
       /* --------------------------------------
-         PRODUCTS
+         MENU / PRODUCTS
       -------------------------------------- */
 
       case 'products':
@@ -171,7 +175,7 @@ export default function AdminApp() {
         )
 
       /* --------------------------------------
-         OFFERS
+         OFFERS & PROMOTIONS
       -------------------------------------- */
 
       case 'offers':

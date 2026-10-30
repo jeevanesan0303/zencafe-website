@@ -1,6 +1,7 @@
 
 import React, {
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -27,13 +28,15 @@ import {
 import './index.css'
 
 /* ==========================================
-   TYPES
+   ZEN CAFÉ — ADMIN AUTHENTICATION
 ========================================== */
 
 type AuthView = 'login' | 'forgot-password'
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 /* ==========================================
-   SWEETALERT2 THEME
+   SWEETALERT THEME
 ========================================== */
 
 const authAlert = Swal.mixin({
@@ -50,12 +53,6 @@ const authAlert = Swal.mixin({
 })
 
 /* ==========================================
-   VALIDATION
-========================================== */
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-/* ==========================================
    ADMIN LOGIN COMPONENT
 ========================================== */
 
@@ -66,11 +63,13 @@ function AdminLogin() {
   const [password, setPassword] = useState('')
   const [recoveryEmail, setRecoveryEmail] = useState('')
 
-  // Password is always hidden when the page first opens.
+  // Password must be hidden by default.
   const [showPassword, setShowPassword] = useState(false)
 
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const passwordInputRef = useRef<HTMLInputElement>(null)
 
   /* ========================================
      CHECK EXISTING SESSION
@@ -88,6 +87,13 @@ function AdminLogin() {
 
   function togglePasswordVisibility() {
     setShowPassword(previous => !previous)
+
+    // Keep the input focused after clicking the icon.
+    requestAnimationFrame(() => {
+      passwordInputRef.current?.focus({
+        preventScroll: true,
+      })
+    })
   }
 
   /* ========================================
@@ -112,8 +118,8 @@ function AdminLogin() {
   ======================================== */
 
   async function handleLogin(
-    event: FormEvent<HTMLFormElement>
-  ) {
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault()
 
     if (loading) return
@@ -159,7 +165,7 @@ function AdminLogin() {
     try {
       const authenticated = await mockLogin(
         normalizedEmail,
-        password
+        password,
       )
 
       if (!authenticated) {
@@ -177,7 +183,7 @@ function AdminLogin() {
         return
       }
 
-      // Hide password before navigating.
+      // Clear the password before navigation.
       setShowPassword(false)
       setPassword('')
 
@@ -209,8 +215,8 @@ function AdminLogin() {
   ======================================== */
 
   async function handleForgotPassword(
-    event: FormEvent<HTMLFormElement>
-  ) {
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault()
 
     if (loading) return
@@ -236,8 +242,8 @@ function AdminLogin() {
       return
     }
 
-    // No password-reset backend endpoint is currently
-    // confirmed. Do not simulate a successful reset.
+    // Do not claim that an email was sent without
+    // a configured password recovery endpoint.
     await authAlert.fire({
       icon: 'info',
       title: 'Password Recovery',
@@ -264,14 +270,16 @@ function AdminLogin() {
     'flex w-full items-center justify-center gap-3 rounded-xl bg-[#a62521] px-5 py-4 text-sm font-bold text-white transition hover:bg-[#831b18] disabled:cursor-not-allowed disabled:opacity-60'
 
   /* ========================================
-     PAGE
+     LOGIN PAGE
   ======================================== */
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5ece4] px-4 py-12">
       <div className="w-full max-w-[440px] rounded-[32px] bg-[#fffaf6] p-8 shadow-[0_20px_65px_rgba(65,36,25,0.12)] sm:p-12">
 
-        {/* BRAND */}
+        {/* ==================================
+            BRAND
+        ================================== */}
 
         <div className="text-center">
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#a62521] bg-white shadow-sm">
@@ -297,9 +305,9 @@ function AdminLogin() {
           </p>
         </div>
 
-        {/* ======================================
+        {/* ==================================
             LOGIN FORM
-        ====================================== */}
+        ================================== */}
 
         {view === 'login' && (
           <form
@@ -361,6 +369,7 @@ function AdminLogin() {
                 />
 
                 <input
+                  ref={passwordInputRef}
                   id="admin-password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
@@ -377,11 +386,12 @@ function AdminLogin() {
                   className={inputClass}
                 />
 
-                {/* PASSWORD EYE BUTTON */}
+                {/* PASSWORD VISIBILITY BUTTON */}
 
                 <button
                   type="button"
                   onClick={togglePasswordVisibility}
+                  disabled={loading}
                   aria-label={
                     showPassword
                       ? 'Hide password'
@@ -393,16 +403,20 @@ function AdminLogin() {
                       ? 'Hide password'
                       : 'Show password'
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#87756c] transition-colors hover:bg-[#f8ebe6] hover:text-[#a62521] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a62521]"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#87756c] transition-colors hover:bg-[#f8ebe6] hover:text-[#a62521] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a62521] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {showPassword ? (
-                    <EyeOff
+                    // VISIBLE: OPEN EYE
+                    <Eye
                       size={19}
+                      strokeWidth={1.9}
                       aria-hidden="true"
                     />
                   ) : (
-                    <Eye
+                    // HIDDEN: CROSSED EYE
+                    <EyeOff
                       size={19}
+                      strokeWidth={1.9}
                       aria-hidden="true"
                     />
                   )}
@@ -422,7 +436,7 @@ function AdminLogin() {
               </div>
             </div>
 
-            {/* ERROR */}
+            {/* ERROR MESSAGE */}
 
             {error && (
               <p
@@ -450,9 +464,9 @@ function AdminLogin() {
           </form>
         )}
 
-        {/* ======================================
+        {/* ==================================
             FORGOT PASSWORD FORM
-        ====================================== */}
+        ================================== */}
 
         {view === 'forgot-password' && (
           <form
@@ -555,9 +569,9 @@ function AdminLogin() {
 ========================================== */
 
 ReactDOM.createRoot(
-  document.getElementById('root')!
+  document.getElementById('root')!,
 ).render(
   <React.StrictMode>
     <AdminLogin />
-  </React.StrictMode>
+  </React.StrictMode>,
 )
