@@ -44,7 +44,6 @@ import {
 } from '../../data/settingsStore'
 
 import { getAdminAuthHeaders } from '../../admin-auth'
-
 import AdminAlert from '../utils/sweetAlert'
 
 /* ==========================================
@@ -106,6 +105,9 @@ const TABS = [
 const EMAIL_REGEX =
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+const PHONE_REGEX = /^[0-9]{10}$/
+const PHONE_MAX_LENGTH = 10
+
 /* ==========================================
    HELPERS
 ========================================== */
@@ -113,7 +115,7 @@ const EMAIL_REGEX =
 function getErrorMessage(
   error: unknown,
   fallback: string
-) {
+): string {
   return error instanceof Error
     ? error.message
     : fallback
@@ -122,12 +124,26 @@ function getErrorMessage(
 function settingsEqual(
   first: CafeSettings,
   second: CafeSettings
-) {
+): boolean {
   return (
     JSON.stringify(first) ===
     JSON.stringify(second)
   )
 }
+
+function sanitizePhone(value: string): string {
+  return value
+    .replace(/[^0-9]/g, '')
+    .slice(0, PHONE_MAX_LENGTH)
+}
+
+function isValidPhone(value: string): boolean {
+  return PHONE_REGEX.test(value)
+}
+
+/* ==========================================
+   PROFILE IMAGE PROCESSING
+========================================== */
 
 async function processProfileImage(
   file: File
@@ -150,8 +166,7 @@ async function processProfileImage(
     )
   }
 
-  const objectUrl =
-    URL.createObjectURL(file)
+  const objectUrl = URL.createObjectURL(file)
 
   try {
     const image =
@@ -159,15 +174,15 @@ async function processProfileImage(
         (resolve, reject) => {
           const img = new Image()
 
-          img.onload = () =>
-            resolve(img)
+          img.onload = () => resolve(img)
 
-          img.onerror = () =>
+          img.onerror = () => {
             reject(
               new Error(
                 'Unable to read the selected image.'
               )
             )
+          }
 
           img.src = objectUrl
         }
@@ -181,8 +196,7 @@ async function processProfileImage(
     canvas.width = size
     canvas.height = size
 
-    const context =
-      canvas.getContext('2d')
+    const context = canvas.getContext('2d')
 
     if (!context) {
       throw new Error(
@@ -255,14 +269,10 @@ export default function Settings({
   const [activeTab, setActiveTab] =
     useState<SettingsTab>(initialTab)
 
-  const [message, setMessage] =
-    useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
 
-  const [error, setError] =
-    useState('')
-
-  const [saving, setSaving] =
-    useState(false)
+  const [saving, setSaving] = useState(false)
 
   const [
     imageProcessing,
@@ -272,38 +282,76 @@ export default function Settings({
   const fileInputRef =
     useRef<HTMLInputElement>(null)
 
+  const phoneInputRef =
+    useRef<HTMLInputElement>(null)
+
   const imageRequestRef = useRef(0)
-
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [passwordUpdating, setPasswordUpdating] = useState(false)
-
   const actionLockRef = useRef(false)
 
-  const hasChanges =
-    !settingsEqual(
-      settings,
-      savedSettings
-    )
+  const [currentPassword, setCurrentPassword] =
+    useState('')
+
+  const [newPassword, setNewPassword] =
+    useState('')
+
+  const [confirmPassword, setConfirmPassword] =
+    useState('')
+
+  const [
+    passwordUpdating,
+    setPasswordUpdating,
+  ] = useState(false)
+
+  const [phoneTouched, setPhoneTouched] =
+    useState(false)
+
+  const hasChanges = !settingsEqual(
+    settings,
+    savedSettings
+  )
+
+  const phoneValue = settings.phone || ''
+
+  const phoneIsValid = isValidPhone(phoneValue)
+
+  const showPhoneError =
+    phoneTouched && !phoneIsValid
 
   /* ==========================================
-     FETCH LIVE SETTINGS FROM API
+     FETCH LIVE SETTINGS
   ========================================== */
 
   useEffect(() => {
-    fetchCafeSettings(true)
+    let mounted = true
+
+    void fetchCafeSettings(true)
       .then(latest => {
-        setSettings(latest)
+        if (!mounted) return
+
+        setSettings(current => {
+          const cached = readCafeSettings()
+
+          return settingsEqual(current, cached)
+            ? latest
+            : current
+        })
+
         setSavedSettings(latest)
       })
       .catch(err => {
-        console.warn('Unable to load settings from API:', err)
+        console.warn(
+          'Unable to load settings from API:',
+          err
+        )
       })
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   /* ==========================================
-     INITIAL TAB NAVIGATION
+     INITIAL TAB
   ========================================== */
 
   useEffect(() => {
@@ -318,16 +366,12 @@ export default function Settings({
 
   useEffect(() => {
     return subscribeCafeSettings(() => {
-      const latest =
-        readCafeSettings()
+      const latest = readCafeSettings()
 
       setSavedSettings(previous => {
         setSettings(current => {
           const hasUnsavedChanges =
-            !settingsEqual(
-              current,
-              previous
-            )
+            !settingsEqual(current, previous)
 
           return hasUnsavedChanges
             ? current
@@ -340,7 +384,7 @@ export default function Settings({
   }, [])
 
   /* ==========================================
-     IMAGE CLEANUP
+     CLEANUP
   ========================================== */
 
   useEffect(() => {
@@ -371,12 +415,50 @@ export default function Settings({
   }
 
   /* ==========================================
+     CONTACT NUMBER VALIDATION
+  ========================================== */
+
+  function handlePhoneChange(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    if (saving) return
+
+    const cleanNumber = sanitizePhone(
+      event.target.value
+    )
+
+    setPhoneTouched(true)
+
+    updateField('phone', cleanNumber)
+  }
+
+  function handlePhoneBlur() {
+    setPhoneTouched(true)
+  }
+
+  function getPhoneError(): string {
+    if (!phoneValue) {
+      return 'Please enter a 10-digit contact number.'
+    }
+
+    if (phoneValue.length < PHONE_MAX_LENGTH) {
+      return `Enter ${
+        PHONE_MAX_LENGTH - phoneValue.length
+      } more digit${
+        PHONE_MAX_LENGTH - phoneValue.length === 1
+          ? ''
+          : 's'
+      }.`
+    }
+
+    return 'Contact number must contain exactly 10 digits.'
+  }
+
+  /* ==========================================
      TAB NAVIGATION
   ========================================== */
 
-  function changeTab(
-    tab: SettingsTab
-  ) {
+  function changeTab(tab: SettingsTab) {
     setActiveTab(tab)
     setMessage('')
     setError('')
@@ -408,8 +490,7 @@ export default function Settings({
   async function handleImageUpload(
     event: ChangeEvent<HTMLInputElement>
   ) {
-    const file =
-      event.target.files?.[0]
+    const file = event.target.files?.[0]
 
     if (
       !file ||
@@ -542,6 +623,8 @@ export default function Settings({
       return
     }
 
+    /* ADMINISTRATOR NAME */
+
     if (!settings.adminName.trim()) {
       await showValidationError(
         'profile',
@@ -550,6 +633,8 @@ export default function Settings({
       )
       return
     }
+
+    /* ADMINISTRATOR EMAIL */
 
     if (
       !EMAIL_REGEX.test(
@@ -564,6 +649,8 @@ export default function Settings({
       return
     }
 
+    /* CAFÉ NAME */
+
     if (!settings.cafeName.trim()) {
       await showValidationError(
         'general',
@@ -572,6 +659,8 @@ export default function Settings({
       )
       return
     }
+
+    /* BUSINESS EMAIL */
 
     if (
       !EMAIL_REGEX.test(
@@ -586,10 +675,30 @@ export default function Settings({
       return
     }
 
+    /* ======================================
+       CONTACT NUMBER — EXACTLY 10 DIGITS
+    ====================================== */
+
+    if (!isValidPhone(settings.phone || '')) {
+      setPhoneTouched(true)
+
+      await showValidationError(
+        'general',
+        'Invalid Contact Number',
+        'Please enter exactly 10 digits using numbers only. Example: 0771234567.'
+      )
+
+      window.requestAnimationFrame(() => {
+        phoneInputRef.current?.focus()
+      })
+
+      return
+    }
+
+    /* MAXIMUM GUESTS */
+
     if (
-      !Number.isInteger(
-        settings.maxGuests
-      ) ||
+      !Number.isInteger(settings.maxGuests) ||
       settings.maxGuests < 1
     ) {
       await showValidationError(
@@ -599,6 +708,8 @@ export default function Settings({
       )
       return
     }
+
+    /* BOOKING DURATION */
 
     if (
       !Number.isFinite(
@@ -614,8 +725,9 @@ export default function Settings({
       return
     }
 
-    const updatedSettings:
-      CafeSettings = {
+    /* NORMALIZED SETTINGS */
+
+    const updatedSettings: CafeSettings = {
       ...settings,
 
       adminName:
@@ -629,6 +741,9 @@ export default function Settings({
 
       email:
         settings.email.trim(),
+
+      phone:
+        settings.phone.trim(),
     }
 
     actionLockRef.current = true
@@ -637,12 +752,12 @@ export default function Settings({
     setError('')
 
     try {
-      await saveCafeSettings(
-        updatedSettings
-      )
+      await saveCafeSettings(updatedSettings)
 
       setSettings(updatedSettings)
       setSavedSettings(updatedSettings)
+
+      setPhoneTouched(false)
 
       setMessage(
         'Your settings have been saved successfully.'
@@ -656,7 +771,7 @@ export default function Settings({
       const description =
         getErrorMessage(
           caughtError,
-          'Unable to save settings. Browser storage may be full.'
+          'Unable to save settings. Please try again.'
         )
 
       setError(description)
@@ -704,6 +819,7 @@ export default function Settings({
         ...savedSettings,
       })
 
+      setPhoneTouched(false)
       setMessage('')
       setError('')
 
@@ -747,6 +863,7 @@ export default function Settings({
         ...DEFAULT_CAFE_SETTINGS,
       })
 
+      setPhoneTouched(false)
       setError('')
 
       setMessage(
@@ -771,8 +888,7 @@ export default function Settings({
     description: string,
     key: ToggleKey
   ) {
-    const checked =
-      settings[key]
+    const checked = settings[key]
 
     return (
       <div
@@ -794,10 +910,7 @@ export default function Settings({
             checked ? 'is-on' : ''
           }`}
           onClick={() =>
-            updateField(
-              key,
-              !checked
-            )
+            updateField(key, !checked)
           }
         >
           <span />
@@ -830,9 +943,7 @@ export default function Settings({
         {/* PROFILE PHOTO */}
 
         <div className="za-profile-photo-panel">
-
           <div className="za-profile-photo-preview">
-
             {settings.adminAvatar ? (
               <img
                 src={settings.adminAvatar}
@@ -845,14 +956,10 @@ export default function Settings({
             <span className="za-profile-camera-icon">
               <Camera size={15} />
             </span>
-
           </div>
 
           <div className="za-profile-photo-details">
-
-            <h3>
-              Profile Picture
-            </h3>
+            <h3>Profile Picture</h3>
 
             <p>
               Upload a professional photo
@@ -862,17 +969,13 @@ export default function Settings({
             </p>
 
             <div className="za-profile-photo-buttons">
-
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                style={{
-                  display: 'none',
-                }}
+                style={{ display: 'none' }}
                 disabled={
-                  imageProcessing ||
-                  saving
+                  imageProcessing || saving
                 }
                 onChange={handleImageUpload}
                 aria-label="Upload profile picture"
@@ -882,8 +985,7 @@ export default function Settings({
                 type="button"
                 className="za-primary"
                 disabled={
-                  imageProcessing ||
-                  saving
+                  imageProcessing || saving
                 }
                 onClick={() =>
                   fileInputRef.current?.click()
@@ -901,8 +1003,7 @@ export default function Settings({
                   type="button"
                   className="za-profile-remove-button"
                   disabled={
-                    imageProcessing ||
-                    saving
+                    imageProcessing || saving
                   }
                   onClick={() => {
                     void removeProfileImage()
@@ -912,7 +1013,6 @@ export default function Settings({
                   Remove
                 </button>
               )}
-
             </div>
 
             <small>
@@ -921,9 +1021,7 @@ export default function Settings({
               cropped and optimized
               before saving.
             </small>
-
           </div>
-
         </div>
 
         {/* PERSONAL INFORMATION */}
@@ -934,7 +1032,6 @@ export default function Settings({
         </div>
 
         <div className="za-settings-field-grid">
-
           <label>
             Administrator Name *
 
@@ -968,7 +1065,6 @@ export default function Settings({
               }
             />
           </label>
-
         </div>
 
         <div className="za-settings-info">
@@ -982,7 +1078,6 @@ export default function Settings({
             your login credentials.
           </p>
         </div>
-
       </div>
     )
   }
@@ -1010,8 +1105,9 @@ export default function Settings({
 
         <div className="za-settings-fields">
 
-          <div className="za-settings-field-grid">
+          {/* CAFÉ NAME AND TAGLINE */}
 
+          <div className="za-settings-field-grid">
             <label>
               Café Name *
 
@@ -1045,11 +1141,11 @@ export default function Settings({
                 }
               />
             </label>
-
           </div>
 
-          <div className="za-settings-field-grid">
+          {/* BUSINESS EMAIL AND CONTACT */}
 
+          <div className="za-settings-field-grid">
             <label>
               <span>
                 <Mail size={14} />
@@ -1070,27 +1166,84 @@ export default function Settings({
               />
             </label>
 
+            {/* ==================================
+                VALIDATED CONTACT NUMBER
+            ================================== */}
+
             <label>
               <span>
                 <Phone size={14} />
-                Contact Number
+                Contact Number *
               </span>
 
               <input
-                type="tel"
-                value={settings.phone}
-                placeholder="+94 77 123 4567"
+                ref={phoneInputRef}
+                type="text"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                maxLength={10}
+                pattern="[0-9]{10}"
+                value={phoneValue}
+                placeholder="e.g. 0771234567"
                 disabled={saving}
-                onChange={event =>
+                aria-invalid={showPhoneError}
+                aria-describedby="za-phone-help"
+                onChange={handlePhoneChange}
+                onBlur={handlePhoneBlur}
+                onPaste={event => {
+                  event.preventDefault()
+
+                  const pastedText =
+                    event.clipboardData.getData('text')
+
+                  const cleanNumber =
+                    sanitizePhone(pastedText)
+
+                  setPhoneTouched(true)
+
                   updateField(
                     'phone',
-                    event.target.value
+                    cleanNumber
                   )
-                }
+                }}
+                style={{
+                  borderColor: showPhoneError
+                    ? '#c62828'
+                    : phoneTouched && phoneIsValid
+                      ? '#25804a'
+                      : undefined,
+                }}
               />
-            </label>
 
+              <small
+                id="za-phone-help"
+                role={
+                  showPhoneError
+                    ? 'alert'
+                    : undefined
+                }
+                style={{
+                  display: 'block',
+                  marginTop: '7px',
+                  color: showPhoneError
+                    ? '#b42318'
+                    : phoneTouched && phoneIsValid
+                      ? '#25804a'
+                      : '#8b7770',
+                  fontSize: '12px',
+                  lineHeight: 1.5,
+                }}
+              >
+                {showPhoneError
+                  ? getPhoneError()
+                  : phoneTouched && phoneIsValid
+                    ? 'Valid 10-digit contact number.'
+                    : 'Enter exactly 10 digits (numbers only).'}
+              </small>
+            </label>
           </div>
+
+          {/* CAFÉ ADDRESS */}
 
           <label>
             <span>
@@ -1120,7 +1273,6 @@ export default function Settings({
           </div>
 
           <div className="za-settings-field-grid">
-
             <label>
               Opening Time
 
@@ -1152,7 +1304,6 @@ export default function Settings({
                 }
               />
             </label>
-
           </div>
 
           {/* CURRENCY */}
@@ -1187,9 +1338,7 @@ export default function Settings({
               </option>
             </select>
           </label>
-
         </div>
-
       </div>
     )
   }
@@ -1216,7 +1365,6 @@ export default function Settings({
         </div>
 
         <div className="za-settings-toggle-list">
-
           {renderSwitch(
             'Enable Room Bookings',
             'Allow customers to request room reservations.',
@@ -1228,7 +1376,6 @@ export default function Settings({
             'Automatically confirm new booking requests.',
             'autoConfirmBookings'
           )}
-
         </div>
 
         <div className="za-settings-subheading">
@@ -1237,7 +1384,6 @@ export default function Settings({
         </div>
 
         <div className="za-settings-field-grid">
-
           <label>
             Maximum Guests per Booking
 
@@ -1250,9 +1396,7 @@ export default function Settings({
               onChange={event =>
                 updateField(
                   'maxGuests',
-                  Number(
-                    event.target.value
-                  )
+                  Number(event.target.value)
                 )
               }
             />
@@ -1272,14 +1416,11 @@ export default function Settings({
               onChange={event =>
                 updateField(
                   'defaultBookingDuration',
-                  Number(
-                    event.target.value
-                  )
+                  Number(event.target.value)
                 )
               }
             />
           </label>
-
         </div>
 
         <div className="za-settings-info">
@@ -1293,7 +1434,6 @@ export default function Settings({
             settings to enforce them.
           </p>
         </div>
-
       </div>
     )
   }
@@ -1310,9 +1450,7 @@ export default function Settings({
           <Bell size={23} />
 
           <div>
-            <h2>
-              Notification Settings
-            </h2>
+            <h2>Notification Settings</h2>
 
             <p>
               Choose which administrator
@@ -1323,7 +1461,6 @@ export default function Settings({
         </div>
 
         <div className="za-settings-toggle-list">
-
           {renderSwitch(
             'Email Notifications',
             'Enable email notifications for administrator updates.',
@@ -1341,7 +1478,6 @@ export default function Settings({
             'Receive alerts about offers and promotions.',
             'promotionNotifications'
           )}
-
         </div>
 
         <div className="za-settings-info">
@@ -1355,14 +1491,9 @@ export default function Settings({
             integration.
           </p>
         </div>
-
       </div>
     )
   }
-
-  /* ==========================================
-     ACCOUNT AND SECURITY
-  ========================================== */
 
   /* ==========================================
      ADMIN PASSWORD CHANGE
@@ -1379,7 +1510,10 @@ export default function Settings({
       return
     }
 
-    if (!newPassword || newPassword.length < 8) {
+    if (
+      !newPassword ||
+      newPassword.length < 8
+    ) {
       await AdminAlert.warning(
         'Password Too Short',
         'New password must be at least 8 characters long.'
@@ -1395,49 +1529,65 @@ export default function Settings({
       return
     }
 
-    const confirmed = await AdminAlert.confirm(
-      'Update Password?',
-      'Are you sure you want to change your administrator password?',
-      'Yes, Update Password'
-    )
+    const confirmed =
+      await AdminAlert.confirm(
+        'Update Password?',
+        'Are you sure you want to change your administrator password?',
+        'Yes, Update Password'
+      )
 
     if (!confirmed) return
 
     setPasswordUpdating(true)
 
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...getAdminAuthHeaders(),
-        },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          confirmPassword,
-        }),
-      })
+      const res = await fetch(
+        '/api/admin/change-password',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getAdminAuthHeaders(),
+          },
+          body: JSON.stringify({
+            currentPassword,
+            newPassword,
+            confirmPassword,
+          }),
+        }
+      )
 
-      const data = await res.json()
+      const data = await res
+        .json()
+        .catch(() => ({}))
 
-      if (!res.ok) {
-        throw new Error(data.error || data.message || 'Failed to update password.')
+      if (
+        !res.ok ||
+        data.success === false
+      ) {
+        throw new Error(
+          data.error ||
+          data.message ||
+          'Failed to update password.'
+        )
       }
+
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
 
       await AdminAlert.success(
         'Password Changed!',
         'Your administrator password has been updated successfully.'
       )
-
-      setCurrentPassword('')
-      setNewPassword('')
-      setConfirmPassword('')
-    } catch (err: any) {
+    } catch (caughtError) {
       await AdminAlert.error(
         'Password Update Failed',
-        err.message || 'Failed to change administrator password.'
+        getErrorMessage(
+          caughtError,
+          'Failed to change administrator password.'
+        )
       )
     } finally {
       setPasswordUpdating(false)
@@ -1456,17 +1606,18 @@ export default function Settings({
           <ShieldCheck size={23} />
 
           <div>
-            <h2>
-              Account & Security
-            </h2>
+            <h2>Account & Security</h2>
 
             <p>
-              View your administrator account information and manage security credentials.
+              View your administrator account
+              information and manage
+              security credentials.
             </p>
           </div>
         </div>
 
         {/* ADMIN PROFILE */}
+
         <div className="za-settings-admin-profile">
           <div className="za-settings-admin-avatar">
             {settings.adminAvatar ? (
@@ -1491,69 +1642,112 @@ export default function Settings({
           </div>
         </div>
 
-        {/* PASSWORD CHANGE SECTION */}
+        {/* PASSWORD CHANGE */}
+
         <div className="za-settings-subheading">
           <LockKeyhole size={18} />
           <h3>Change Administrator Password</h3>
         </div>
 
-        <div className="za-settings-field-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <div
+          className="za-settings-field-grid"
+          style={{
+            gridTemplateColumns: '1fr',
+          }}
+        >
           <label>
             Current Password *
+
             <input
               type="password"
               value={currentPassword}
               placeholder="Enter current password"
               disabled={passwordUpdating}
-              onChange={event => setCurrentPassword(event.target.value)}
+              onChange={event =>
+                setCurrentPassword(
+                  event.target.value
+                )
+              }
               autoComplete="current-password"
             />
           </label>
 
           <label>
             New Password (minimum 8 characters) *
+
             <input
               type="password"
               value={newPassword}
-              placeholder="Enter new secure password (min. 8 characters)"
+              placeholder="Enter new secure password"
               disabled={passwordUpdating}
-              onChange={event => setNewPassword(event.target.value)}
+              onChange={event =>
+                setNewPassword(
+                  event.target.value
+                )
+              }
               autoComplete="new-password"
             />
           </label>
 
           <label>
             Confirm New Password *
+
             <input
               type="password"
               value={confirmPassword}
               placeholder="Re-enter new secure password"
               disabled={passwordUpdating}
-              onChange={event => setConfirmPassword(event.target.value)}
+              onChange={event =>
+                setConfirmPassword(
+                  event.target.value
+                )
+              }
               autoComplete="new-password"
             />
           </label>
         </div>
 
-        <div style={{ marginTop: '16px', display: 'flex', gap: '12px' }}>
+        <div
+          style={{
+            marginTop: '16px',
+            display: 'flex',
+            gap: '12px',
+          }}
+        >
           <button
             type="button"
             className="za-primary"
-            disabled={passwordUpdating || !currentPassword || !newPassword || !confirmPassword}
-            onClick={() => void handlePasswordChange()}
+            disabled={
+              passwordUpdating ||
+              !currentPassword ||
+              !newPassword ||
+              !confirmPassword
+            }
+            onClick={() => {
+              void handlePasswordChange()
+            }}
           >
             <LockKeyhole size={17} />
-            {passwordUpdating ? 'Updating Password...' : 'Update Password'}
+
+            {passwordUpdating
+              ? 'Updating Password...'
+              : 'Update Password'}
           </button>
         </div>
 
-        <div className="za-settings-info" style={{ marginTop: '24px' }}>
+        <div
+          className="za-settings-info"
+          style={{ marginTop: '24px' }}
+        >
           <Info size={19} />
+
           <p>
-            Passwords are encrypted using secure cryptographic hashing (scrypt) and are never stored in plaintext. Password changes take effect immediately on the server.
+            Password changes are processed
+            through the administrator API.
+            Use a strong, unique password
+            and keep your credentials private.
           </p>
         </div>
-
       </div>
     )
   }
@@ -1565,13 +1759,12 @@ export default function Settings({
   const searchText =
     query.trim().toLowerCase()
 
-  const visibleTabs =
-    TABS.filter(tab =>
-      !searchText ||
-      tab.label
-        .toLowerCase()
-        .includes(searchText)
-    )
+  const visibleTabs = TABS.filter(tab =>
+    !searchText ||
+    tab.label
+      .toLowerCase()
+      .includes(searchText)
+  )
 
   /* ==========================================
      PAGE RENDER
@@ -1583,7 +1776,6 @@ export default function Settings({
       {/* BREADCRUMB */}
 
       <div className="za-products-breadcrumb">
-
         <button
           type="button"
           onClick={() =>
@@ -1596,13 +1788,11 @@ export default function Settings({
         <span>/</span>
 
         <strong>Settings</strong>
-
       </div>
 
       {/* PAGE HEADER */}
 
       <div className="za-products-page-head">
-
         <div>
           <p className="za-kicker">
             ADMINISTRATION
@@ -1620,8 +1810,7 @@ export default function Settings({
           type="button"
           className="za-settings-reset"
           disabled={
-            saving ||
-            imageProcessing
+            saving || imageProcessing
           }
           onClick={() => {
             void resetDefaults()
@@ -1630,7 +1819,6 @@ export default function Settings({
           <RotateCcw size={17} />
           Reset Defaults
         </button>
-
       </div>
 
       {/* SETTINGS LAYOUT */}
@@ -1675,8 +1863,7 @@ export default function Settings({
 
           {visibleTabs.length === 0 && (
             <p className="za-settings-no-results">
-              No matching settings
-              sections.
+              No matching settings sections.
             </p>
           )}
 
@@ -1691,13 +1878,11 @@ export default function Settings({
               </small>
             </span>
           </div>
-
         </aside>
 
         {/* SETTINGS CONTENT */}
 
         <section className="za-settings-content">
-
           <form
             onSubmit={saveSettings}
             noValidate
@@ -1747,7 +1932,6 @@ export default function Settings({
             <div className="za-settings-actions">
 
               <div className="za-settings-unsaved">
-
                 {hasChanges ? (
                   <>
                     <span className="za-settings-unsaved-dot" />
@@ -1759,7 +1943,6 @@ export default function Settings({
                     All changes saved
                   </>
                 )}
-
               </div>
 
               <div className="za-settings-action-buttons">
@@ -1795,17 +1978,11 @@ export default function Settings({
                     ? 'Saving...'
                     : 'Save Changes'}
                 </button>
-
               </div>
-
             </div>
-
           </form>
-
         </section>
-
       </div>
-
     </div>
   )
 }

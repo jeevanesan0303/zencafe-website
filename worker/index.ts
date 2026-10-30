@@ -1,21 +1,54 @@
 
+/* ==========================================
+   ZEN CAFÉ — CLOUDFLARE WORKER
+   Clean URLs + API Proxy + Static Assets
+========================================== */
+
 interface Env {
   ASSETS: {
     fetch(request: Request): Promise<Response>
   }
+
   API_V2_URL: string
 }
 
+/* ==========================================
+   WEBSITE PAGE ROUTES
+========================================== */
+
 const pageRoutes: Record<string, string> = {
   '/': '/index.html',
+
   '/admin': '/admin.html',
   '/admin/login': '/admin-login.html',
   '/admin-bookings': '/admin-bookings.html',
+
   '/zen-kitchen': '/zen-kitchen.html',
   '/offers': '/offers.html',
   '/register': '/register.html',
   '/games': '/games.html',
 }
+
+/* ==========================================
+   LEGACY HTML REDIRECTS
+========================================== */
+
+const legacyRoutes: Record<string, string> = {
+  '/index.html': '/',
+
+  '/admin.html': '/admin',
+  '/admin-login.html': '/admin/login',
+  '/admin-bookings.html': '/admin-bookings',
+
+  '/zen-kitchen.html': '/zen-kitchen',
+  '/offers.html': '/offers',
+  '/register.html': '/register',
+  '/games.html': '/games',
+}
+
+/* ==========================================
+   API PATH DETECTION
+========================================== */
 
 function isApiPath(pathname: string): boolean {
   return (
@@ -23,6 +56,10 @@ function isApiPath(pathname: string): boolean {
     pathname.startsWith('/api/')
   )
 }
+
+/* ==========================================
+   API PROXY
+========================================== */
 
 async function proxyApi(
   request: Request,
@@ -34,7 +71,9 @@ async function proxyApi(
         success: false,
         error: 'Zen Café API URL is not configured.',
       },
-      { status: 503 },
+      {
+        status: 503,
+      },
     )
   }
 
@@ -42,16 +81,17 @@ async function proxyApi(
     const incomingUrl = new URL(request.url)
     const backendUrl = new URL(env.API_V2_URL)
 
-    // Preserve the complete API path and query parameters.
+    // Preserve the complete API path.
     backendUrl.pathname =
       backendUrl.pathname.replace(/\/+$/, '') +
       incomingUrl.pathname
 
+    // Preserve API query parameters.
     backendUrl.search = incomingUrl.search
 
     const headers = new Headers(request.headers)
 
-    // Allow Cloudflare to set the correct upstream Host.
+    // Let Cloudflare set the upstream Host header.
     headers.delete('host')
 
     const hasBody =
@@ -92,10 +132,60 @@ async function proxyApi(
         error:
           'The Zen Café API is temporarily unavailable.',
       },
-      { status: 502 },
+      {
+        status: 502,
+      },
     )
   }
 }
+
+/* ==========================================
+   REDIRECT HELPER
+========================================== */
+
+function redirectToCleanUrl(
+  request: Request,
+  cleanPath: string,
+): Response {
+  const url = new URL(request.url)
+
+  url.pathname = cleanPath
+
+  // Preserve query parameters.
+  // Example:
+  // /register.html?ref=home
+  // becomes:
+  // /register?ref=home
+
+  return Response.redirect(
+    url.toString(),
+    308,
+  )
+}
+
+/* ==========================================
+   STATIC PAGE HANDLER
+========================================== */
+
+async function servePage(
+  request: Request,
+  env: Env,
+  htmlPath: string,
+): Promise<Response> {
+  const assetUrl = new URL(request.url)
+
+  assetUrl.pathname = htmlPath
+
+  // Serve the HTML file internally without
+  // changing the browser's clean URL.
+  return env.ASSETS.fetch(
+    new Request(assetUrl.toString(), request),
+  )
+}
+
+/* ==========================================
+   CLOUDFLARE WORKER ENTRY
+========================================== */
 
 export default {
   async fetch(
@@ -104,31 +194,80 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url)
 
-    // API requests always go to the VPS backend.
-    if (isApiPath(url.pathname)) {
+    const pathname = url.pathname
+
+    /* --------------------------------------
+       1. API REQUESTS
+    -------------------------------------- */
+
+    // API requests always go to the
+    // configured Zen Café API backend.
+    if (isApiPath(pathname)) {
       return proxyApi(request, env)
     }
+
+    /* --------------------------------------
+       2. CHECK STATIC ASSET BINDING
+    -------------------------------------- */
 
     if (!env.ASSETS) {
       return new Response(
         'Website assets are not configured.',
-        { status: 503 },
+        {
+          status: 503,
+        },
       )
     }
 
-    // Serve the correct HTML entry for each route.
-    const page = pageRoutes[url.pathname]
+    /* --------------------------------------
+       3. REDIRECT LEGACY HTML URLS
+    -------------------------------------- */
 
-    if (page) {
-      const assetUrl = new URL(request.url)
-      assetUrl.pathname = page
+    // Redirect only browser navigation requests.
+    // Preserve normal asset handling for
+    // non-navigation requests.
 
-      return env.ASSETS.fetch(
-        new Request(assetUrl, request),
+    if (
+      request.method === 'GET' ||
+      request.method === 'HEAD'
+    ) {
+      const cleanPath = legacyRoutes[pathname]
+
+      if (cleanPath) {
+        return redirectToCleanUrl(
+          request,
+          cleanPath,
+        )
+      }
+    }
+
+    /* --------------------------------------
+       4. SERVE CLEAN PAGE ROUTES
+    -------------------------------------- */
+
+    const normalizedPath =
+      pathname.length > 1
+        ? pathname.replace(/\/+$/, '')
+        : pathname
+
+    const htmlPage = pageRoutes[normalizedPath]
+
+    if (htmlPage) {
+      return servePage(
+        request,
+        env,
+        htmlPage,
       )
     }
 
-    // Serve CSS, JS, images and other static assets.
+    /* --------------------------------------
+       5. STATIC ASSETS
+    -------------------------------------- */
+
+    // All remaining requests:
+    // CSS, JavaScript, images, fonts,
+    // favicons, and other static files.
+
     return env.ASSETS.fetch(request)
   },
 }

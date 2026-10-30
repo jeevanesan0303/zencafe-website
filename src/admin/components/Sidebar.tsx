@@ -8,7 +8,6 @@ import {
   CalendarDays,
   Gamepad2,
   House,
-  Image as ImageIcon,
   LogOut,
   Settings,
   Tags,
@@ -67,11 +66,6 @@ const links: {
     label: 'Room Bookings',
     icon: CalendarDays,
   },
-  {
-    id: 'gallery',
-    label: 'Community Gallery',
-    icon: ImageIcon,
-  },
 ]
 
 /* ==========================================
@@ -97,7 +91,9 @@ export default function Sidebar({
      PAGE NAVIGATION
   ========================================== */
 
-  function navigate(nextPage: AdminPage) {
+  function navigate(
+    nextPage: AdminPage
+  ): void {
     onNavigate(nextPage)
 
     // Close sidebar after selecting a page
@@ -108,7 +104,7 @@ export default function Sidebar({
      LOGOUT WITH SWEETALERT2
   ========================================== */
 
-  async function logout() {
+  async function logout(): Promise<void> {
     if (logoutLockRef.current) {
       return
     }

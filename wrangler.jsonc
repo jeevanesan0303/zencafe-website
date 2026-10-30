@@ -21,13 +21,11 @@
     }
   ],
   "triggers": {
-    "crons": [
-      
-    ]
+    "crons": []
   },
   "vars": {
     "PUBLIC_BASE_URL": "https://zencafe.lk",
     "API_V2_URL": "https://api-v2.zencafe.lk",
-    "RESEND_FROM_EMAIL":  "Zen Café <noreply@zencafe.lk>"
+    "RESEND_FROM_EMAIL": "Zen Café <noreply@zencafe.lk>"
   }
 }

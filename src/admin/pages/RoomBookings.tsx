@@ -1,5 +1,6 @@
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -7,6 +8,7 @@ import {
 } from 'react'
 
 import type { FormEvent } from 'react'
+
 import Swal from 'sweetalert2'
 
 import {
@@ -15,6 +17,8 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   DoorOpen,
   LockKeyhole,
@@ -64,6 +68,8 @@ type Filter =
   | 'completed'
   | 'cancelled'
 
+type PageSize = 10 | 25 | 50
+
 type ModifyDraft = {
   bookingId: string
   customerName: string
@@ -84,37 +90,62 @@ type BlockDraft = {
 }
 
 /* ==========================================
-   HELPERS
+   CONSTANTS
 ========================================== */
 
-function formatDate(value: string) {
+const PAGE_SIZES: PageSize[] = [10, 25, 50]
+
+const REFRESH_INTERVAL = 30_000
+
+const FILTERS: {
+  value: Filter
+  label: string
+}[] = [
+  { value: 'all', label: 'All Bookings' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Accepted' },
+  {
+    value: 'modification_proposed',
+    label: 'Modified',
+  },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+/* ==========================================
+   DATE AND TIME HELPERS
+========================================== */
+
+function formatDate(value: string): string {
   if (!value) return '—'
 
   const parts = value.slice(0, 10).split('-')
 
   if (parts.length === 3) {
-    const [y, m, d] = parts.map(Number)
+    const [year, month, day] = parts.map(Number)
 
     if (
-      Number.isFinite(y) &&
-      Number.isFinite(m) &&
-      Number.isFinite(d)
+      Number.isFinite(year) &&
+      Number.isFinite(month) &&
+      Number.isFinite(day)
     ) {
-      return new Date(y, m - 1, d).toLocaleDateString(
-        'en-GB',
-        {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        }
-      )
+      return new Date(
+        year,
+        month - 1,
+        day
+      ).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
     }
   }
 
   return value
 }
 
-function formatTime(value: string) {
+function formatTime(value: string): string {
   if (!value) return '—'
 
   const [hour, minute] = value.split(':').map(Number)
@@ -138,7 +169,52 @@ function formatTime(value: string) {
   })
 }
 
-function statusBadgeLabel(status: BookingStatus) {
+function getLocalToday(): string {
+  try {
+    const parts = new Intl.DateTimeFormat(
+      'en-GB',
+      {
+        timeZone: 'Asia/Colombo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }
+    ).formatToParts(new Date())
+
+    const year = parts.find(
+      part => part.type === 'year'
+    )?.value
+
+    const month = parts.find(
+      part => part.type === 'month'
+    )?.value
+
+    const day = parts.find(
+      part => part.type === 'day'
+    )?.value
+
+    if (year && month && day) {
+      return `${year}-${month}-${day}`
+    }
+  } catch {
+    // Fallback below.
+  }
+
+  const now = new Date()
+
+  return new Date(
+    now.getTime() -
+      now.getTimezoneOffset() * 60_000
+  ).toISOString().slice(0, 10)
+}
+
+/* ==========================================
+   BOOKING STATUS HELPERS
+========================================== */
+
+function statusBadgeLabel(
+  status: BookingStatus
+): string {
   switch (status) {
     case 'pending':
       return 'Pending'
@@ -163,39 +239,9 @@ function statusBadgeLabel(status: BookingStatus) {
   }
 }
 
-function getLocalToday() {
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Colombo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(new Date())
-
-    const year = parts.find(p => p.type === 'year')?.value
-    const month = parts.find(p => p.type === 'month')?.value
-    const day = parts.find(p => p.type === 'day')?.value
-
-    if (year && month && day) {
-      return `${year}-${month}-${day}`
-    }
-  } catch {
-    // Use local date fallback.
-  }
-
-  const now = new Date()
-  const local = new Date(
-    now.getTime() - now.getTimezoneOffset() * 60000
-  )
-
-  return local.toISOString().slice(0, 10)
-}
-
-function isPendingBooking(booking: RoomBooking) {
-  return booking.status === 'pending'
-}
-
-function reviewedMessage(status: BookingStatus) {
+function reviewedMessage(
+  status: BookingStatus
+): string {
   switch (status) {
     case 'confirmed':
       return 'Booking accepted and reserved'
@@ -218,6 +264,137 @@ function reviewedMessage(status: BookingStatus) {
 }
 
 /* ==========================================
+   BOOKING PRIORITY
+
+   Pending requests always appear first.
+========================================== */
+
+function bookingPriority(
+  status: BookingStatus
+): number {
+  switch (status) {
+    case 'pending':
+      return 0
+
+    case 'confirmed':
+      return 1
+
+    case 'modification_proposed':
+      return 2
+
+    case 'rejected':
+      return 3
+
+    case 'completed':
+      return 4
+
+    case 'cancelled':
+      return 5
+
+    default:
+      return 6
+  }
+}
+
+/* ==========================================
+   BOOKING SUBMISSION TIMESTAMP
+
+   Supports common backend timestamp fields.
+========================================== */
+
+function bookingCreatedTimestamp(
+  booking: RoomBooking
+): number | null {
+  const record = booking as RoomBooking &
+    Record<string, unknown>
+
+  const candidates = [
+    record.createdAt,
+    record.created_at,
+    record.requestedAt,
+    record.requested_at,
+    record.submittedAt,
+    record.submitted_at,
+  ]
+
+  for (const value of candidates) {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number'
+    ) {
+      continue
+    }
+
+    const timestamp =
+      typeof value === 'number'
+        ? value < 100_000_000_000
+          ? value * 1000
+          : value
+        : Date.parse(value)
+
+    if (Number.isFinite(timestamp)) {
+      return timestamp
+    }
+  }
+
+  return null
+}
+
+/* ==========================================
+   SORT BOOKINGS
+
+   1. Pending first
+   2. Newest submission first
+   3. Reservation date as fallback
+========================================== */
+
+function compareBookings(
+  a: RoomBooking,
+  b: RoomBooking
+): number {
+  const priority =
+    bookingPriority(a.status) -
+    bookingPriority(b.status)
+
+  if (priority !== 0) {
+    return priority
+  }
+
+  const aCreated = bookingCreatedTimestamp(a)
+  const bCreated = bookingCreatedTimestamp(b)
+
+  if (aCreated !== null && bCreated !== null) {
+    if (aCreated !== bCreated) {
+      return bCreated - aCreated
+    }
+  } else if (aCreated !== null) {
+    return -1
+  } else if (bCreated !== null) {
+    return 1
+  }
+
+  return (
+    `${b.bookingDate}T${b.bookingTime}`.localeCompare(
+      `${a.bookingDate}T${a.bookingTime}`
+    )
+  )
+}
+
+/* ==========================================
+   DEFAULT BLOCK FORM
+========================================== */
+
+function createDefaultBlockDraft(): BlockDraft {
+  return {
+    roomName: 'Private Dining Room',
+    blockDate: getLocalToday(),
+    startTime: '12:00',
+    endTime: '15:00',
+    reason: '',
+  }
+}
+
+/* ==========================================
    ROOM BOOKINGS COMPONENT
 ========================================== */
 
@@ -225,17 +402,43 @@ export default function Bookings({
   onNavigate,
   query = '',
 }: Props) {
-  const [bookings, setBookings] = useState<RoomBooking[]>([])
-  const [blocks, setBlocks] = useState<BookingBlock[]>([])
+  /* ==========================================
+     STATE
+  ========================================== */
+
+  const [bookings, setBookings] = useState<
+    RoomBooking[]
+  >([])
+
+  const [blocks, setBlocks] = useState<
+    BookingBlock[]
+  >([])
 
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<Filter>('all')
+
+  const [refreshing, setRefreshing] =
+    useState(false)
+
+  const [filter, setFilter] =
+    useState<Filter>('all')
+
   const [search, setSearch] = useState('')
+
   const [error, setError] = useState('')
 
-  const [busyId, setBusyId] = useState<string | null>(
-    null
-  )
+  const [busyId, setBusyId] = useState<
+    string | null
+  >(null)
+
+  /* PAGINATION */
+
+  const [currentPage, setCurrentPage] =
+    useState(1)
+
+  const [pageSize, setPageSize] =
+    useState<PageSize>(10)
+
+  /* MODIFY MODAL */
 
   const [modifyModalOpen, setModifyModalOpen] =
     useState(false)
@@ -243,104 +446,255 @@ export default function Bookings({
   const [modifyDraft, setModifyDraft] =
     useState<ModifyDraft | null>(null)
 
-  const [modifying, setModifying] = useState(false)
-  const [modifyError, setModifyError] = useState('')
+  const [modifying, setModifying] =
+    useState(false)
+
+  const [modifyError, setModifyError] =
+    useState('')
+
+  /* BLOCK MODAL */
 
   const [blockModalOpen, setBlockModalOpen] =
     useState(false)
 
   const [blockDraft, setBlockDraft] =
-    useState<BlockDraft>({
-      roomName: 'Private Dining Room',
-      blockDate: getLocalToday(),
-      startTime: '12:00',
-      endTime: '15:00',
-      reason: '',
-    })
+    useState<BlockDraft>(
+      createDefaultBlockDraft
+    )
 
-  const [blocking, setBlocking] = useState(false)
-  const [blockError, setBlockError] = useState('')
+  const [blocking, setBlocking] =
+    useState(false)
+
+  const [blockError, setBlockError] =
+    useState('')
+
+  /* ==========================================
+     REFS
+  ========================================== */
+
+  const mountedRef = useRef(false)
 
   const actionLockRef = useRef(false)
 
-  /*
-   * Prevent stale refresh responses from restoring
-   * booking actions after a successful admin decision.
-   */
   const refreshSequenceRef = useRef(0)
+
+  const refreshInProgressRef = useRef(false)
 
   const bookingsRef = useRef<RoomBooking[]>([])
 
+  const initialLoadRef = useRef(true)
+
+  const modifyOpenRef = useRef(false)
+
+  const blockOpenRef = useRef(false)
+
+  /* ==========================================
+     KEEP MODAL REFS UPDATED
+  ========================================== */
+
+  useEffect(() => {
+    modifyOpenRef.current = modifyModalOpen
+  }, [modifyModalOpen])
+
+  useEffect(() => {
+    blockOpenRef.current = blockModalOpen
+  }, [blockModalOpen])
+
+  /* ==========================================
+     LOCAL BOOKING STATE UPDATE
+  ========================================== */
+
   function updateBookings(
-    updater: (previous: RoomBooking[]) => RoomBooking[]
-  ) {
+    updater: (
+      previous: RoomBooking[]
+    ) => RoomBooking[]
+  ): void {
     const next = updater(bookingsRef.current)
+
     bookingsRef.current = next
-    setBookings(next)
+
+    if (mountedRef.current) {
+      setBookings(next)
+    }
   }
 
   /* ==========================================
-     DATA LOADING
+     REFRESH DATA FROM BACKEND
   ========================================== */
 
-  async function refreshData() {
-    const sequence = ++refreshSequenceRef.current
-
-    try {
-      setLoading(true)
-      setError('')
-
-      const [bookingList, blockList] = await Promise.all([
-        loadAdminBookings(),
-        loadBookingBlocks().catch(() => []),
-      ])
-
-      if (sequence !== refreshSequenceRef.current) {
+  const refreshData = useCallback(
+    async (
+      options: {
+        silent?: boolean
+      } = {}
+    ): Promise<void> => {
+      if (
+        actionLockRef.current ||
+        modifyOpenRef.current ||
+        blockOpenRef.current ||
+        refreshInProgressRef.current
+      ) {
         return
       }
 
-      bookingsRef.current = bookingList
-      setBookings(bookingList)
-      setBlocks(blockList)
-    } catch (err) {
-      if (sequence !== refreshSequenceRef.current) {
-        return
+      const sequence =
+        ++refreshSequenceRef.current
+
+      const silent = options.silent === true
+
+      refreshInProgressRef.current = true
+
+      if (mountedRef.current) {
+        if (silent) {
+          setRefreshing(true)
+        } else {
+          setLoading(true)
+        }
       }
 
-      console.error('Failed to load bookings:', err)
+      try {
+        const [bookingResult, blockResult] =
+          await Promise.allSettled([
+            loadAdminBookings(),
+            loadBookingBlocks(),
+          ])
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Could not connect to the bookings database.'
-      )
-    } finally {
-      if (sequence === refreshSequenceRef.current) {
-        setLoading(false)
+        if (
+          !mountedRef.current ||
+          sequence !== refreshSequenceRef.current ||
+          actionLockRef.current
+        ) {
+          return
+        }
+
+        if (bookingResult.status === 'fulfilled') {
+          bookingsRef.current =
+            bookingResult.value
+
+          setBookings(bookingResult.value)
+
+          setError('')
+        } else {
+          const message =
+            bookingResult.reason instanceof Error
+              ? bookingResult.reason.message
+              : 'Could not load room bookings.'
+
+          setError(message)
+
+          console.error(
+            '[Zen Café] Booking refresh failed:',
+            bookingResult.reason
+          )
+        }
+
+        if (blockResult.status === 'fulfilled') {
+          setBlocks(blockResult.value)
+        } else {
+          console.warn(
+            '[Zen Café] Availability blocks refresh failed:',
+            blockResult.reason
+          )
+        }
+      } finally {
+        if (sequence === refreshSequenceRef.current) {
+          refreshInProgressRef.current = false
+        }
+
+        if (mountedRef.current) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
-    }
-  }
+    },
+    []
+  )
+
+  /* ==========================================
+     INITIAL LOAD AND AUTO REFRESH
+  ========================================== */
 
   useEffect(() => {
-    void refreshData()
+    mountedRef.current = true
 
-    const unsubscribe = subscribeRoomBookings(() => {
-      // The booking store may update its local cache.
-      // Server refresh remains available via Refresh.
-    })
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false
+
+      void refreshData()
+    }
+
+    const interval = window.setInterval(() => {
+      if (
+        document.visibilityState === 'visible' &&
+        !actionLockRef.current &&
+        !modifyOpenRef.current &&
+        !blockOpenRef.current
+      ) {
+        void refreshData({ silent: true })
+      }
+    }, REFRESH_INTERVAL)
+
+    const handleFocus = () => {
+      if (
+        !actionLockRef.current &&
+        !modifyOpenRef.current &&
+        !blockOpenRef.current
+      ) {
+        void refreshData({ silent: true })
+      }
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleFocus()
+      }
+    }
+
+    window.addEventListener(
+      'focus',
+      handleFocus
+    )
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibility
+    )
+
+    const unsubscribe = subscribeRoomBookings(
+      () => {
+        // Server polling remains authoritative.
+      }
+    )
 
     return () => {
+      mountedRef.current = false
+
       refreshSequenceRef.current += 1
+
+      refreshInProgressRef.current = false
+
+      window.clearInterval(interval)
+
+      window.removeEventListener(
+        'focus',
+        handleFocus
+      )
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibility
+      )
+
       unsubscribe()
     }
-  }, [])
+  }, [refreshData])
 
   /* ==========================================
      STATISTICS
   ========================================== */
 
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    return {
       total: bookings.length,
 
       pending: bookings.filter(
@@ -353,22 +707,23 @@ export default function Bookings({
 
       modified: bookings.filter(
         booking =>
-          booking.status === 'modification_proposed'
+          booking.status ===
+          'modification_proposed'
       ).length,
 
       rejected: bookings.filter(
         booking => booking.status === 'rejected'
       ).length,
-    }),
-    [bookings]
-  )
+    }
+  }, [bookings])
 
   /* ==========================================
-     FILTERED BOOKINGS
+     FILTER AND SORT BOOKINGS
   ========================================== */
 
   const filtered = useMemo(() => {
     const local = search.trim().toLowerCase()
+
     const global = query.trim().toLowerCase()
 
     return [...bookings]
@@ -383,9 +738,11 @@ export default function Bookings({
           booking.phone,
           booking.roomName,
           booking.bookingDate,
+          booking.bookingTime,
           booking.status,
           booking.notes,
         ]
+          .filter(Boolean)
           .join(' ')
           .toLowerCase()
 
@@ -395,18 +752,54 @@ export default function Bookings({
           (!global || searchable.includes(global))
         )
       })
-      .sort((a, b) =>
-        `${b.bookingDate}T${b.bookingTime}`.localeCompare(
-          `${a.bookingDate}T${a.bookingTime}`
-        )
-      )
+      .sort(compareBookings)
   }, [bookings, filter, search, query])
 
   /* ==========================================
-     VERIFY BOOKING IS STILL PENDING
+     PAGINATION
   ========================================== */
 
-  function canReviewBooking(booking: RoomBooking) {
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filtered.length / pageSize)
+  )
+
+  const safePage = Math.min(
+    Math.max(1, currentPage),
+    totalPages
+  )
+
+  const firstRowIndex =
+    (safePage - 1) * pageSize
+
+  const paginatedBookings = useMemo(() => {
+    return filtered.slice(
+      firstRowIndex,
+      firstRowIndex + pageSize
+    )
+  }, [filtered, firstRowIndex, pageSize])
+
+  const firstVisibleRow =
+    filtered.length === 0
+      ? 0
+      : firstRowIndex + 1
+
+  const lastVisibleRow = Math.min(
+    firstRowIndex + pageSize,
+    filtered.length
+  )
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filter, search, query, pageSize])
+
+  /* ==========================================
+     VERIFY BOOKING CAN BE REVIEWED
+  ========================================== */
+
+  function canReviewBooking(
+    booking: RoomBooking
+  ): boolean {
     const latest = bookingsRef.current.find(
       item => item.id === booking.id
     )
@@ -420,11 +813,14 @@ export default function Bookings({
     )
   }
 
+  /* ==========================================
+     APPLY BOOKING DECISION
+  ========================================== */
+
   function applyBookingDecision(
     bookingId: string,
     updated: RoomBooking
-  ) {
-    // Invalidate any refresh started before this action.
+  ): void {
     refreshSequenceRef.current += 1
 
     updateBookings(previous =>
@@ -439,19 +835,17 @@ export default function Bookings({
   }
 
   /* ==========================================
-     1. ACCEPT BOOKING
+     ACCEPT BOOKING
   ========================================== */
 
-  async function handleAccept(booking: RoomBooking) {
-    if (!canReviewBooking(booking)) {
-      return
-    }
+  async function handleAccept(
+    booking: RoomBooking
+  ): Promise<void> {
+    if (!canReviewBooking(booking)) return
 
     const confirmed = await AdminAlert.confirm(
       'Accept Room Booking?',
-      `Confirm and exclusively reserve "${booking.roomName}" for ${booking.customerName} on ${formatDate(
-        booking.bookingDate
-      )} at ${formatTime(booking.bookingTime)}?`,
+      `Confirm and exclusively reserve "${booking.roomName}" for ${booking.customerName} on ${formatDate(booking.bookingDate)} at ${formatTime(booking.bookingTime)}?`,
       'Yes, Accept Booking'
     )
 
@@ -460,6 +854,8 @@ export default function Bookings({
     }
 
     actionLockRef.current = true
+    refreshSequenceRef.current += 1
+
     setBusyId(booking.id)
 
     try {
@@ -467,21 +863,21 @@ export default function Bookings({
         booking.id
       )
 
-      applyBookingDecision(booking.id, updated)
+      applyBookingDecision(
+        booking.id,
+        updated
+      )
 
       await AdminAlert.success(
         'Booking Accepted!',
         `The reservation for ${booking.customerName} is now confirmed and the room slot is reserved.`
       )
     } catch (err) {
-      const message =
+      await AdminAlert.error(
+        'Cannot Accept Booking',
         err instanceof Error
           ? err.message
           : 'Failed to accept booking.'
-
-      await AdminAlert.error(
-        'Cannot Accept Booking',
-        message
       )
     } finally {
       setBusyId(null)
@@ -490,13 +886,13 @@ export default function Bookings({
   }
 
   /* ==========================================
-     2. REJECT BOOKING
+     REJECT BOOKING
   ========================================== */
 
-  async function handleReject(booking: RoomBooking) {
-    if (!canReviewBooking(booking)) {
-      return
-    }
+  async function handleReject(
+    booking: RoomBooking
+  ): Promise<void> {
+    if (!canReviewBooking(booking)) return
 
     const { value: reason, isConfirmed } =
       await Swal.fire({
@@ -507,7 +903,7 @@ export default function Bookings({
         input: 'textarea',
 
         inputPlaceholder:
-          'e.g. Room unavailable due to scheduled maintenance...',
+          'Enter the reason for rejection...',
 
         inputAttributes: {
           'aria-label': 'Rejection reason',
@@ -515,8 +911,11 @@ export default function Bookings({
         },
 
         showCancelButton: true,
+
         confirmButtonText: 'Confirm Rejection',
+
         confirmButtonColor: '#b42318',
+
         cancelButtonText: 'Cancel',
 
         inputValidator: value => {
@@ -537,6 +936,8 @@ export default function Bookings({
     }
 
     actionLockRef.current = true
+    refreshSequenceRef.current += 1
+
     setBusyId(booking.id)
 
     try {
@@ -545,21 +946,21 @@ export default function Bookings({
         reason.trim()
       )
 
-      applyBookingDecision(booking.id, updated)
+      applyBookingDecision(
+        booking.id,
+        updated
+      )
 
       await AdminAlert.success(
         'Booking Rejected',
         `The booking for ${booking.customerName} has been rejected. The customer notification is queued.`
       )
     } catch (err) {
-      const message =
+      await AdminAlert.error(
+        'Rejection Failed',
         err instanceof Error
           ? err.message
           : 'Failed to reject booking.'
-
-      await AdminAlert.error(
-        'Rejection Failed',
-        message
       )
     } finally {
       setBusyId(null)
@@ -568,13 +969,13 @@ export default function Bookings({
   }
 
   /* ==========================================
-     3. MODIFY BOOKING
+     OPEN MODIFY MODAL
   ========================================== */
 
-  function openModifyModal(booking: RoomBooking) {
-    if (!canReviewBooking(booking)) {
-      return
-    }
+  function openModifyModal(
+    booking: RoomBooking
+  ): void {
+    if (!canReviewBooking(booking)) return
 
     setModifyDraft({
       bookingId: booking.id,
@@ -582,7 +983,8 @@ export default function Bookings({
       originalDate: booking.bookingDate,
       originalTime: booking.bookingTime,
       proposedDate:
-        booking.proposedDate || booking.bookingDate,
+        booking.proposedDate ||
+        booking.bookingDate,
       proposedStartTime:
         booking.proposedStartTime ||
         booking.bookingTime,
@@ -590,11 +992,18 @@ export default function Bookings({
       reason: booking.adminReason || '',
     })
 
+    modifyOpenRef.current = true
     setModifyError('')
     setModifyModalOpen(true)
   }
 
-  async function submitModify(event: FormEvent) {
+  /* ==========================================
+     SUBMIT MODIFICATION
+  ========================================== */
+
+  async function submitModify(
+    event: FormEvent
+  ): Promise<void> {
     event.preventDefault()
 
     if (
@@ -605,16 +1014,18 @@ export default function Bookings({
       return
     }
 
-    const currentBooking = bookingsRef.current.find(
-      booking => booking.id === modifyDraft.bookingId
-    )
+    const currentBooking =
+      bookingsRef.current.find(
+        booking =>
+          booking.id === modifyDraft.bookingId
+      )
 
     if (
       !currentBooking ||
-      !isPendingBooking(currentBooking)
+      currentBooking.status !== 'pending'
     ) {
       setModifyError(
-        'This booking has already been reviewed. Refresh the bookings list.'
+        'This booking has already been reviewed.'
       )
       return
     }
@@ -626,16 +1037,12 @@ export default function Bookings({
       return
     }
 
-    if (!modifyDraft.proposedDate) {
+    if (
+      !modifyDraft.proposedDate ||
+      !modifyDraft.proposedStartTime
+    ) {
       setModifyError(
-        'Please select a proposed date.'
-      )
-      return
-    }
-
-    if (!modifyDraft.proposedStartTime) {
-      setModifyError(
-        'Please select a proposed time.'
+        'Please select a proposed date and time.'
       )
       return
     }
@@ -650,6 +1057,8 @@ export default function Bookings({
     }
 
     actionLockRef.current = true
+    refreshSequenceRef.current += 1
+
     setModifying(true)
     setBusyId(modifyDraft.bookingId)
     setModifyError('')
@@ -671,6 +1080,7 @@ export default function Bookings({
         updated
       )
 
+      modifyOpenRef.current = false
       setModifyModalOpen(false)
       setModifyDraft(null)
 
@@ -692,10 +1102,12 @@ export default function Bookings({
   }
 
   /* ==========================================
-     4. DELETE BOOKING
+     DELETE BOOKING
   ========================================== */
 
-  async function removeBooking(booking: RoomBooking) {
+  async function removeBooking(
+    booking: RoomBooking
+  ): Promise<void> {
     if (
       actionLockRef.current ||
       busyId !== null
@@ -708,14 +1120,13 @@ export default function Bookings({
         `booking for "${booking.customerName}"`
       )
 
-    if (
-      !confirmed ||
-      actionLockRef.current
-    ) {
+    if (!confirmed || actionLockRef.current) {
       return
     }
 
     actionLockRef.current = true
+    refreshSequenceRef.current += 1
+
     setBusyId(booking.id)
 
     try {
@@ -729,21 +1140,16 @@ export default function Bookings({
         )
       )
 
-      setLoading(false)
-
       await AdminAlert.success(
         'Booking Deleted',
         'The booking record has been permanently removed.'
       )
     } catch (err) {
-      const message =
+      await AdminAlert.error(
+        'Deletion Failed',
         err instanceof Error
           ? err.message
           : 'Failed to delete booking.'
-
-      await AdminAlert.error(
-        'Deletion Failed',
-        message
       )
     } finally {
       setBusyId(null)
@@ -752,36 +1158,44 @@ export default function Bookings({
   }
 
   /* ==========================================
-     5. MANUAL DATE / TIME BLOCKING
+     OPEN MANUAL BLOCK MODAL
   ========================================== */
 
-  function openBlockModal() {
-    setBlockDraft({
-      roomName: 'Private Dining Room',
-      blockDate: getLocalToday(),
-      startTime: '12:00',
-      endTime: '15:00',
-      reason: '',
-    })
+  function openBlockModal(): void {
+    blockOpenRef.current = true
+
+    setBlockDraft(
+      createDefaultBlockDraft()
+    )
 
     setBlockError('')
     setBlockModalOpen(true)
   }
 
-  async function submitBlock(event: FormEvent) {
+  /* ==========================================
+     CREATE MANUAL BLOCK
+  ========================================== */
+
+  async function submitBlock(
+    event: FormEvent
+  ): Promise<void> {
     event.preventDefault()
 
-    if (blocking) {
+    if (
+      blocking ||
+      actionLockRef.current
+    ) {
       return
     }
 
     if (
+      !blockDraft.roomName.trim() ||
       !blockDraft.blockDate ||
       !blockDraft.startTime ||
       !blockDraft.endTime
     ) {
       setBlockError(
-        'Please fill in date, start time, and end time.'
+        'Please complete all required fields.'
       )
       return
     }
@@ -795,12 +1209,22 @@ export default function Bookings({
       return
     }
 
+    if (
+      blockDraft.blockDate < getLocalToday()
+    ) {
+      setBlockError(
+        'The block date cannot be in the past.'
+      )
+      return
+    }
+
+    actionLockRef.current = true
     setBlocking(true)
     setBlockError('')
 
     try {
       const newBlock = await createBookingBlock({
-        roomName: blockDraft.roomName,
+        roomName: blockDraft.roomName.trim(),
         blockDate: blockDraft.blockDate,
         startTime: blockDraft.startTime,
         endTime: blockDraft.endTime,
@@ -810,18 +1234,17 @@ export default function Bookings({
 
       setBlocks(previous => [
         newBlock,
-        ...previous,
+        ...previous.filter(
+          item => item.id !== newBlock.id
+        ),
       ])
 
+      blockOpenRef.current = false
       setBlockModalOpen(false)
 
       await AdminAlert.success(
         'Slot Blocked Successfully!',
-        `${blockDraft.roomName} is now blocked on ${formatDate(
-          blockDraft.blockDate
-        )} from ${formatTime(
-          blockDraft.startTime
-        )} to ${formatTime(blockDraft.endTime)}.`
+        `${blockDraft.roomName} is now blocked on ${formatDate(blockDraft.blockDate)} from ${formatTime(blockDraft.startTime)} to ${formatTime(blockDraft.endTime)}.`
       )
     } catch (err) {
       setBlockError(
@@ -831,25 +1254,30 @@ export default function Bookings({
       )
     } finally {
       setBlocking(false)
+      actionLockRef.current = false
     }
   }
 
-  async function removeBlock(block: BookingBlock) {
+  /* ==========================================
+     REMOVE MANUAL BLOCK
+  ========================================== */
+
+  async function removeBlock(
+    block: BookingBlock
+  ): Promise<void> {
+    if (actionLockRef.current) return
+
     const confirmed = await AdminAlert.confirm(
       'Remove Manual Block?',
-      `Unblock ${block.roomName} on ${formatDate(
-        block.blockDate
-      )} (${formatTime(
-        block.startTime
-      )} - ${formatTime(
-        block.endTime
-      )})? This will make the slot available again.`,
+      `Unblock ${block.roomName} on ${formatDate(block.blockDate)} (${formatTime(block.startTime)} - ${formatTime(block.endTime)})?`,
       'Yes, Unblock'
     )
 
-    if (!confirmed) {
+    if (!confirmed || actionLockRef.current) {
       return
     }
+
+    actionLockRef.current = true
 
     try {
       await deleteBookingBlock(block.id)
@@ -865,15 +1293,14 @@ export default function Bookings({
         'The time slot is now available.'
       )
     } catch (err) {
-      const message =
+      await AdminAlert.error(
+        'Unblock Failed',
         err instanceof Error
           ? err.message
           : 'Failed to remove block.'
-
-      await AdminAlert.error(
-        'Unblock Failed',
-        message
       )
+    } finally {
+      actionLockRef.current = false
     }
   }
 
@@ -912,63 +1339,66 @@ export default function Bookings({
           </h1>
 
           <p>
-            Review pending booking requests, confirm
-            reservations, reject requests, or propose
-            alternative dates and times.
+            Manage reservation requests,
+            review pending bookings and
+            control room availability.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-
           <button
             type="button"
-            className="za-row-action !h-10 !w-auto !px-4 !rounded-full !border !border-[#513226]/15 bg-white font-bold"
-            onClick={() => void refreshData()}
-            disabled={loading || busyId !== null}
-            title="Refresh from PostgreSQL"
+            className="za-row-action !h-10 !w-auto !rounded-full !border !border-[#513226]/15 !px-4 bg-white font-bold"
+            onClick={() =>
+              void refreshData({ silent: true })
+            }
+            disabled={
+              loading ||
+              refreshing ||
+              busyId !== null
+            }
           >
             <RefreshCw
               size={15}
               className={
-                loading ? 'animate-spin' : ''
+                loading || refreshing
+                  ? 'animate-spin'
+                  : ''
               }
             />
 
             <span className="ml-1.5 text-xs">
-              Refresh
+              {refreshing
+                ? 'Refreshing...'
+                : 'Refresh'}
             </span>
           </button>
 
           <button
             type="button"
-            className="za-action-btn za-action-reject !px-4 !py-2.5 !rounded-full"
+            className="za-action-btn za-action-reject !rounded-full !px-4 !py-2.5"
             onClick={openBlockModal}
+            disabled={blocking || busyId !== null}
           >
             <Ban size={15} />
             Block Date / Time
           </button>
-
         </div>
       </div>
 
-      {/* STATISTICS */}
+      {/* SUMMARY CARDS */}
 
       <div className="za-product-summary">
-
         <div className="za-product-summary-card">
           <span>Total Requests</span>
           <strong>{stats.total}</strong>
-          <small>
-            All reservations in PostgreSQL
-          </small>
+          <small>All loaded reservations</small>
         </div>
 
         <div className="za-product-summary-card">
           <span>Pending Review</span>
           <strong>{stats.pending}</strong>
-          <small>
-            Awaiting admin action
-          </small>
+          <small>Awaiting admin action</small>
         </div>
 
         <div className="za-product-summary-card">
@@ -978,9 +1408,7 @@ export default function Bookings({
             {stats.confirmed}
           </strong>
 
-          <small>
-            Active room reservations
-          </small>
+          <small>Active room reservations</small>
         </div>
 
         <div className="za-product-summary-card">
@@ -990,14 +1418,11 @@ export default function Bookings({
             {stats.modified}
           </strong>
 
-          <small>
-            Pending customer response
-          </small>
+          <small>Pending customer response</small>
         </div>
-
       </div>
 
-      {/* ERROR BANNER */}
+      {/* ERROR */}
 
       {error && (
         <p
@@ -1008,7 +1433,7 @@ export default function Bookings({
         </p>
       )}
 
-      {/* MAIN RESERVATIONS CARD */}
+      {/* RESERVATION TABLE */}
 
       <section className="za-product-management-card">
 
@@ -1020,11 +1445,10 @@ export default function Bookings({
             </h2>
 
             <p>
-              Review pending requests using{' '}
-              <strong>Accept</strong>,{' '}
+              Pending requests appear first.
+              Review using <strong>Accept</strong>,{' '}
               <strong>Reject</strong>, or{' '}
-              <strong>Modify</strong>. Once reviewed,
-              only the booking status will remain.
+              <strong>Modify</strong>.
             </p>
           </div>
 
@@ -1036,27 +1460,24 @@ export default function Bookings({
         {/* FILTERS */}
 
         <div className="za-product-management-filters">
-
           <div className="za-filter-pills">
-            {(
-              [
-                ['all', 'All Bookings'],
-                ['pending', 'Pending'],
-                ['confirmed', 'Accepted'],
-                ['modification_proposed', 'Modified'],
-                ['rejected', 'Rejected'],
-              ] as const
-            ).map(([value, label]) => (
+            {FILTERS.map(item => (
               <button
-                key={value}
+                key={item.value}
                 type="button"
                 className={
-                  filter === value ? 'active' : ''
+                  filter === item.value
+                    ? 'active'
+                    : ''
                 }
-                onClick={() => setFilter(value)}
-                aria-pressed={filter === value}
+                onClick={() =>
+                  setFilter(item.value)
+                }
+                aria-pressed={
+                  filter === item.value
+                }
               >
-                {label}
+                {item.label}
               </button>
             ))}
           </div>
@@ -1073,15 +1494,12 @@ export default function Bookings({
               }
             />
           </label>
-
         </div>
 
-        {/* BOOKINGS TABLE */}
+        {/* TABLE */}
 
         <div className="za-table-wrap">
-
           <table className="za-table za-management-table">
-
             <thead>
               <tr>
                 <th>Customer</th>
@@ -1095,7 +1513,7 @@ export default function Bookings({
             </thead>
 
             <tbody>
-              {filtered.map(booking => {
+              {paginatedBookings.map(booking => {
                 const isPending =
                   booking.status === 'pending'
 
@@ -1119,7 +1537,6 @@ export default function Bookings({
 
                     <td>
                       <div className="za-booking-customer">
-
                         <div className="za-booking-avatar">
                           {booking.customerName
                             .charAt(0)
@@ -1152,7 +1569,6 @@ export default function Bookings({
                             </small>
                           )}
                         </div>
-
                       </div>
                     </td>
 
@@ -1165,11 +1581,10 @@ export default function Bookings({
                       </div>
                     </td>
 
-                    {/* DATE & TIME */}
+                    {/* DATE AND TIME */}
 
                     <td>
                       <div className="za-booking-date">
-
                         <strong>
                           {formatDate(
                             booking.bookingDate
@@ -1194,12 +1609,9 @@ export default function Bookings({
                           {booking.duration} hr(s)
                         </small>
 
-                        {/* MODIFIED DETAILS */}
-
                         {isModified &&
                           booking.proposedDate && (
                             <div className="mt-1 rounded bg-[#fff0e6] p-1 text-[10px] text-[#b3531b]">
-
                               <strong>
                                 Proposed:
                               </strong>{' '}
@@ -1218,25 +1630,18 @@ export default function Bookings({
                                   "{booking.adminReason}"
                                 </div>
                               )}
-
                             </div>
                           )}
-
-                        {/* REJECTION REASON */}
 
                         {isRejected &&
                           booking.adminReason && (
                             <div className="mt-1 rounded bg-[#fdf2f2] p-1 text-[10px] text-[#b42318]">
-
                               <strong>
                                 Reason:
                               </strong>{' '}
-
                               {booking.adminReason}
-
                             </div>
                           )}
-
                       </div>
                     </td>
 
@@ -1265,15 +1670,7 @@ export default function Bookings({
 
                     <td>
                       {isPending ? (
-
-                        /*
-                         * IMPORTANT:
-                         * Show the three buttons ONLY
-                         * while status is pending.
-                         */
-
                         <div className="za-booking-action-buttons">
-
                           <button
                             type="button"
                             className="za-action-btn za-action-accept"
@@ -1286,7 +1683,6 @@ export default function Bookings({
                                 booking
                               )
                             }
-                            title="Accept and reserve this room slot"
                           >
                             <Check size={13} />
                             Accept
@@ -1304,7 +1700,6 @@ export default function Bookings({
                                 booking
                               )
                             }
-                            title="Reject booking with reason"
                           >
                             <X size={13} />
                             Reject
@@ -1322,27 +1717,16 @@ export default function Bookings({
                                 booking
                               )
                             }
-                            title="Propose alternative date or time"
                           >
                             <CalendarClock size={13} />
                             Modify
                           </button>
-
                         </div>
-
                       ) : (
-
-                        /*
-                         * COMPLETED REVIEW:
-                         * No Accept, Reject, or Modify.
-                         * Display status information only.
-                         */
-
                         <div
                           className="inline-flex items-center gap-2 rounded-full border border-[#e8e0d8] bg-[#faf8f5] px-3 py-2 text-xs font-medium text-[#786a60]"
-                          title="This booking has already been reviewed"
+                          title="Booking already reviewed"
                         >
-
                           {isConfirmed ? (
                             <CheckCircle2
                               size={15}
@@ -1366,9 +1750,7 @@ export default function Bookings({
                               booking.status
                             )}
                           </span>
-
                         </div>
-
                       )}
                     </td>
 
@@ -1399,33 +1781,120 @@ export default function Bookings({
                 )
               })}
             </tbody>
-
           </table>
 
-          {filtered.length === 0 && (
+          {!loading && filtered.length === 0 && (
             <div className="za-management-empty">
-
               <CalendarDays size={32} />
 
               <h3>No bookings found</h3>
 
               <p>
-                {search || filter !== 'all'
+                {search || query || filter !== 'all'
                   ? 'No reservation requests match your filters.'
                   : 'Customer booking requests will appear here when available.'}
               </p>
-
             </div>
           )}
 
+          {loading && bookings.length === 0 && (
+            <div className="za-management-empty">
+              <RefreshCw
+                size={28}
+                className="animate-spin"
+              />
+
+              <h3>Loading reservations...</h3>
+
+              <p>
+                Fetching room bookings from the server.
+              </p>
+            </div>
+          )}
         </div>
+
+        {/* PAGINATION */}
+
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#e8e0d8] px-5 py-4">
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-[#786a60]">
+              Showing {firstVisibleRow}–
+              {lastVisibleRow} of{' '}
+              {filtered.length} bookings
+            </span>
+
+            <label className="flex items-center gap-2 text-xs text-[#786a60]">
+              Rows per page
+
+              <select
+                value={pageSize}
+                onChange={event =>
+                  setPageSize(
+                    Number(
+                      event.target.value
+                    ) as PageSize
+                  )
+                }
+                className="rounded-lg border border-[#e8e0d8] bg-white px-3 py-2 text-xs font-semibold text-[#513226] outline-none focus:border-[#a32722]"
+                aria-label="Bookings per page"
+              >
+                {PAGE_SIZES.map(size => (
+                  <option
+                    key={size}
+                    value={size}
+                  >
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-lg border border-[#e8e0d8] bg-white px-3 py-2 text-xs font-semibold text-[#513226] disabled:opacity-40"
+              disabled={safePage <= 1}
+              onClick={() =>
+                setCurrentPage(previous =>
+                  Math.max(1, previous - 1)
+                )
+              }
+            >
+              <ChevronLeft size={15} />
+              Previous
+            </button>
+
+            <span className="min-w-[80px] text-center text-xs font-semibold text-[#513226]">
+              {safePage} / {totalPages}
+            </span>
+
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-lg border border-[#e8e0d8] bg-white px-3 py-2 text-xs font-semibold text-[#513226] disabled:opacity-40"
+              disabled={safePage >= totalPages}
+              onClick={() =>
+                setCurrentPage(previous =>
+                  Math.min(
+                    totalPages,
+                    previous + 1
+                  )
+                )
+              }
+            >
+              Next
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+
       </section>
 
       {/* ACTIVE MANUAL BLOCKS */}
 
       {blocks.length > 0 && (
         <section className="za-product-management-card za-blocks-panel">
-
           <div className="za-product-management-top">
             <div>
               <h2 className="flex items-center gap-2">
@@ -1447,7 +1916,6 @@ export default function Bookings({
 
           <div className="za-table-wrap">
             <table className="za-table za-management-table">
-
               <thead>
                 <tr>
                   <th>Room</th>
@@ -1461,7 +1929,6 @@ export default function Bookings({
               <tbody>
                 {blocks.map(block => (
                   <tr key={block.id}>
-
                     <td>
                       <strong>
                         {block.roomName}
@@ -1494,26 +1961,21 @@ export default function Bookings({
                     <td>
                       <button
                         type="button"
-                        onClick={() =>
-                          void removeBlock(
-                            block
-                          )
-                        }
                         className="za-action-btn za-action-reject"
                         title="Remove block"
+                        onClick={() =>
+                          void removeBlock(block)
+                        }
                       >
                         <Trash2 size={13} />
                         Unblock
                       </button>
                     </td>
-
                   </tr>
                 ))}
               </tbody>
-
             </table>
           </div>
-
         </section>
       )}
 
@@ -1524,16 +1986,13 @@ export default function Bookings({
           className="za-edit-overlay"
           role="presentation"
         >
-
           <div
             className="za-edit-dialog za-booking-dialog"
             role="dialog"
             aria-modal="true"
             aria-label="Modify booking"
           >
-
             <div className="za-edit-dialog-head">
-
               <div>
                 <p className="za-kicker">
                   PROPOSE ALTERNATIVE TIME
@@ -1549,25 +2008,23 @@ export default function Bookings({
                 type="button"
                 className="za-icon-button"
                 disabled={modifying}
-                onClick={() =>
+                onClick={() => {
+                  modifyOpenRef.current = false
                   setModifyModalOpen(false)
-                }
+                }}
                 aria-label="Close modification dialog"
               >
                 <X size={22} />
               </button>
-
             </div>
 
             <form
               onSubmit={submitModify}
               noValidate
             >
-
               <div className="za-booking-form-section">
 
                 <div className="rounded-[14px] bg-[#fff8f2] p-3 text-xs text-[#695950]">
-
                   <strong>
                     Current Requested Slot:
                   </strong>{' '}
@@ -1579,7 +2036,6 @@ export default function Bookings({
                   {formatTime(
                     modifyDraft.originalTime
                   )}
-
                 </div>
 
                 <div className="za-booking-form-grid mt-4">
@@ -1596,15 +2052,14 @@ export default function Bookings({
                       min={getLocalToday()}
                       disabled={modifying}
                       onChange={event =>
-                        setModifyDraft(
-                          previous =>
-                            previous
-                              ? {
-                                  ...previous,
-                                  proposedDate:
-                                    event.target.value,
-                                }
-                              : null
+                        setModifyDraft(previous =>
+                          previous
+                            ? {
+                                ...previous,
+                                proposedDate:
+                                  event.target.value,
+                              }
+                            : null
                         )
                       }
                     />
@@ -1621,15 +2076,14 @@ export default function Bookings({
                       }
                       disabled={modifying}
                       onChange={event =>
-                        setModifyDraft(
-                          previous =>
-                            previous
-                              ? {
-                                  ...previous,
-                                  proposedStartTime:
-                                    event.target.value,
-                                }
-                              : null
+                        setModifyDraft(previous =>
+                          previous
+                            ? {
+                                ...previous,
+                                proposedStartTime:
+                                  event.target.value,
+                              }
+                            : null
                         )
                       }
                     />
@@ -1643,24 +2097,22 @@ export default function Bookings({
                   <textarea
                     rows={3}
                     required
-                    placeholder="e.g. The requested 2:00 PM slot is fully booked; proposing 4:00 PM instead..."
+                    placeholder="Explain the proposed change..."
                     value={modifyDraft.reason}
                     disabled={modifying}
                     onChange={event =>
-                      setModifyDraft(
-                        previous =>
-                          previous
-                            ? {
-                                ...previous,
-                                reason:
-                                  event.target.value,
-                              }
-                            : null
+                      setModifyDraft(previous =>
+                        previous
+                          ? {
+                              ...previous,
+                              reason:
+                                event.target.value,
+                            }
+                          : null
                       )
                     }
                   />
                 </label>
-
               </div>
 
               {modifyError && (
@@ -1673,14 +2125,14 @@ export default function Bookings({
               )}
 
               <div className="za-edit-dialog-actions">
-
                 <button
                   type="button"
                   className="za-edit-cancel"
                   disabled={modifying}
-                  onClick={() =>
+                  onClick={() => {
+                    modifyOpenRef.current = false
                     setModifyModalOpen(false)
-                  }
+                  }}
                 >
                   Cancel
                 </button>
@@ -1700,32 +2152,26 @@ export default function Bookings({
                     ? 'Proposing...'
                     : 'Save & Queue Notification'}
                 </button>
-
               </div>
-
             </form>
-
           </div>
         </div>
       )}
 
-      {/* MANUAL BLOCK DATE / TIME MODAL */}
+      {/* MANUAL BLOCK MODAL */}
 
       {blockModalOpen && (
         <div
           className="za-edit-overlay"
           role="presentation"
         >
-
           <div
             className="za-edit-dialog za-booking-dialog"
             role="dialog"
             aria-modal="true"
             aria-label="Block room availability"
           >
-
             <div className="za-edit-dialog-head">
-
               <div>
                 <p className="za-kicker">
                   AVAILABILITY MANAGEMENT
@@ -1740,21 +2186,20 @@ export default function Bookings({
                 type="button"
                 className="za-icon-button"
                 disabled={blocking}
-                onClick={() =>
+                onClick={() => {
+                  blockOpenRef.current = false
                   setBlockModalOpen(false)
-                }
+                }}
                 aria-label="Close block dialog"
               >
                 <X size={22} />
               </button>
-
             </div>
 
             <form
               onSubmit={submitBlock}
               noValidate
             >
-
               <div className="za-booking-form-section">
 
                 <label>
@@ -1784,15 +2229,14 @@ export default function Bookings({
                       value={
                         blockDraft.blockDate
                       }
+                      min={getLocalToday()}
                       disabled={blocking}
                       onChange={event =>
-                        setBlockDraft(
-                          previous => ({
-                            ...previous,
-                            blockDate:
-                              event.target.value,
-                          })
-                        )
+                        setBlockDraft(previous => ({
+                          ...previous,
+                          blockDate:
+                            event.target.value,
+                        }))
                       }
                     />
                   </label>
@@ -1808,17 +2252,14 @@ export default function Bookings({
                       }
                       disabled={blocking}
                       onChange={event =>
-                        setBlockDraft(
-                          previous => ({
-                            ...previous,
-                            startTime:
-                              event.target.value,
-                          })
-                        )
+                        setBlockDraft(previous => ({
+                          ...previous,
+                          startTime:
+                            event.target.value,
+                        }))
                       }
                     />
                   </label>
-
                 </div>
 
                 <label className="mt-3">
@@ -1830,13 +2271,11 @@ export default function Bookings({
                     value={blockDraft.endTime}
                     disabled={blocking}
                     onChange={event =>
-                      setBlockDraft(
-                        previous => ({
-                          ...previous,
-                          endTime:
-                            event.target.value,
-                        })
-                      )
+                      setBlockDraft(previous => ({
+                        ...previous,
+                        endTime:
+                          event.target.value,
+                      }))
                     }
                   />
                 </label>
@@ -1845,21 +2284,18 @@ export default function Bookings({
                   Reason (Optional)
 
                   <input
-                    placeholder="e.g. Private event, maintenance, cleaning..."
+                    placeholder="e.g. Private event, maintenance..."
                     value={blockDraft.reason}
                     disabled={blocking}
                     onChange={event =>
-                      setBlockDraft(
-                        previous => ({
-                          ...previous,
-                          reason:
-                            event.target.value,
-                        })
-                      )
+                      setBlockDraft(previous => ({
+                        ...previous,
+                        reason:
+                          event.target.value,
+                      }))
                     }
                   />
                 </label>
-
               </div>
 
               {blockError && (
@@ -1872,14 +2308,14 @@ export default function Bookings({
               )}
 
               <div className="za-edit-dialog-actions">
-
                 <button
                   type="button"
                   className="za-edit-cancel"
                   disabled={blocking}
-                  onClick={() =>
+                  onClick={() => {
+                    blockOpenRef.current = false
                     setBlockModalOpen(false)
-                  }
+                  }}
                 >
                   Cancel
                 </button>
@@ -1895,11 +2331,8 @@ export default function Bookings({
                     ? 'Blocking...'
                     : 'Confirm Block'}
                 </button>
-
               </div>
-
             </form>
-
           </div>
         </div>
       )}

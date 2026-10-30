@@ -5,7 +5,9 @@ import {
   useRef,
   useState,
 } from 'react'
+
 import Swal from 'sweetalert2'
+
 import {
   ArrowLeft,
   CheckCircle2,
@@ -18,27 +20,32 @@ import {
   Sparkles,
   UserRound,
 } from 'lucide-react'
+
 import ThemeToggle from './ThemeToggle'
 
 /* =========================================================
    ZEN CAFÉ — CUSTOMER REGISTRATION
 
-   Workflow:
    1. Customer registers once.
    2. Customer verifies their email.
-   3. Verified details remain in PostgreSQL.
-   4. Customer can return to the gallery anytime.
-   5. Gallery checks the registered email directly.
-   6. No Returning Customer tab or sign-in flow.
+   3. Customer details are stored in PostgreSQL.
+   4. Verified customers can access Community Gallery.
+   5. Gallery checks verification through the backend.
+   6. Gallery upload cooldown remains backend-controlled.
 
-   IMPORTANT:
-   Local storage is only for convenient form prefilling.
-   The backend remains responsible for checking registration,
-   verification, and upload cooldown.
+   PHONE NUMBER:
+   - Exactly 10 digits
+   - Numbers only
+   - Maximum 10 digits
+   - Sri Lankan local format, starting with 0
 ========================================================= */
 
 const CUSTOMER_PROFILE_KEY =
   'zen-cafe-customer-registration-v149'
+
+const PHONE_LENGTH = 10
+
+const PHONE_REGEX = /^0\d{9}$/
 
 type Customer = {
   id?: string
@@ -69,6 +76,10 @@ type SavedCustomerProfile = {
   verified: boolean
 }
 
+/* =========================================================
+   VALIDATION HELPERS
+========================================================= */
+
 const normalizeEmail = (value: string): string =>
   value.trim().toLowerCase()
 
@@ -80,11 +91,15 @@ const validEmail = (value: string): boolean =>
 const validName = (value: string): boolean =>
   value.trim().length >= 2
 
-const validPhone = (value: string): boolean => {
-  const digits = value.replace(/\D/g, '')
+const normalizePhone = (value: string): string =>
+  value.replace(/\D/g, '').slice(0, PHONE_LENGTH)
 
-  return digits.length >= 7 && digits.length <= 15
-}
+const validPhone = (value: string): boolean =>
+  PHONE_REGEX.test(value)
+
+/* =========================================================
+   API RESPONSE
+========================================================= */
 
 async function readJson(
   response: Response,
@@ -113,6 +128,13 @@ async function readJson(
   return data as ApiResponse
 }
 
+/* =========================================================
+   LOCAL PROFILE CACHE
+
+   Local storage is only used for form prefilling.
+   PostgreSQL remains the source of truth.
+========================================================= */
+
 function saveCustomerProfile(
   profile: SavedCustomerProfile,
 ): void {
@@ -123,7 +145,6 @@ function saveCustomerProfile(
     )
   } catch {
     // Local storage is optional.
-    // PostgreSQL remains the source of truth.
   }
 }
 
@@ -165,7 +186,7 @@ function readCustomerProfile():
       email: normalizeEmail(profile.email),
       phone:
         typeof profile.phone === 'string'
-          ? profile.phone
+          ? normalizePhone(profile.phone)
           : '',
       verified: profile.verified === true,
     }
@@ -173,6 +194,10 @@ function readCustomerProfile():
     return null
   }
 }
+
+/* =========================================================
+   VERIFICATION URL
+========================================================= */
 
 function clearVerificationTokenFromUrl(): void {
   const url = new URL(window.location.href)
@@ -190,6 +215,10 @@ function redirectToGallery(): void {
   window.location.replace('/#gallery')
 }
 
+/* =========================================================
+   REGISTER PAGE
+========================================================= */
+
 export default function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -202,22 +231,26 @@ export default function RegisterPage() {
   const [resending, setResending] = useState(false)
   const [verifying, setVerifying] = useState(false)
 
-  const [registrationSubmitted, setRegistrationSubmitted] =
-    useState(false)
+  const [
+    registrationSubmitted,
+    setRegistrationSubmitted,
+  ] = useState(false)
 
-  const [verifiedCustomer, setVerifiedCustomer] =
-    useState(false)
+  const [
+    verifiedCustomer,
+    setVerifiedCustomer,
+  ] = useState(false)
 
   const [devVerifyUrl, setDevVerifyUrl] =
     useState<string | null>(null)
 
   const verificationProcessed = useRef(false)
 
+  const formDisabled =
+    loading || resending || verifying
+
   /* =======================================================
      LOAD SAVED CUSTOMER DETAILS
-
-     Only prefill the registration form.
-     Never treat localStorage as server verification.
   ======================================================= */
 
   useEffect(() => {
@@ -228,19 +261,12 @@ export default function RegisterPage() {
     setName(profile.name)
     setEmail(profile.email)
     setPhone(profile.phone)
-
-    // Verification is always confirmed by the server
-    // when the customer opens the email verification link.
   }, [])
 
   /* =======================================================
-     HANDLE EMAIL VERIFICATION LINK
+     VERIFY EMAIL
 
-     Example:
-     /register?verify=TOKEN
-
-     The token is sent to the backend and removed
-     from the browser URL immediately.
+     Example: /register?verify=TOKEN
   ======================================================= */
 
   useEffect(() => {
@@ -257,8 +283,6 @@ export default function RegisterPage() {
     if (!verifyToken) return
 
     clearVerificationTokenFromUrl()
-
-    let active = true
 
     const verifyEmail = async (): Promise<void> => {
       setVerifying(true)
@@ -291,8 +315,6 @@ export default function RegisterPage() {
           )
         }
 
-        if (!active) return
-
         const customer = data.customer
 
         if (
@@ -305,24 +327,30 @@ export default function RegisterPage() {
           )
         }
 
+        const savedProfile = readCustomerProfile()
+
         const verifiedName =
-          customer.name || name.trim()
+          customer.name ||
+          savedProfile?.name ||
+          ''
 
         const verifiedEmail = normalizeEmail(
           customer.email,
         )
 
         const verifiedPhone =
-          customer.phone || phone.trim()
+          customer.phone ||
+          savedProfile?.phone ||
+          ''
 
         setName(verifiedName)
         setEmail(verifiedEmail)
-        setPhone(verifiedPhone)
+        setPhone(normalizePhone(verifiedPhone))
 
         saveCustomerProfile({
           name: verifiedName,
           email: verifiedEmail,
-          phone: verifiedPhone,
+          phone: normalizePhone(verifiedPhone),
           verified: true,
         })
 
@@ -330,8 +358,9 @@ export default function RegisterPage() {
         setRegistrationSubmitted(false)
 
         setIsError(false)
+
         setMessage(
-          'Your email has been verified successfully. You can now visit the Community Gallery and check your registered email to upload photos.',
+          'Your email has been verified successfully. You can now visit the Community Gallery.',
         )
 
         const result = await Swal.fire({
@@ -346,12 +375,10 @@ export default function RegisterPage() {
           allowOutsideClick: false,
         })
 
-        if (active && result) {
+        if (result.isConfirmed || result.isDismissed) {
           redirectToGallery()
         }
       } catch (error) {
-        if (!active) return
-
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -368,24 +395,32 @@ export default function RegisterPage() {
           confirmButtonText: 'Understood',
         })
       } finally {
-        if (active) {
-          setVerifying(false)
-          setLoading(false)
-        }
+        setVerifying(false)
+        setLoading(false)
       }
     }
 
     void verifyEmail()
-
-    return () => {
-      active = false
-    }
   }, [])
 
   /* =======================================================
-     CUSTOMER REGISTRATION
+     PHONE INPUT HANDLER
 
-     POST /api/auth/register
+     Accept only 0–9.
+     Automatically discard extra characters.
+     Prevent more than 10 digits.
+  ======================================================= */
+
+  function handlePhoneChange(value: string): void {
+    const cleaned = normalizePhone(value)
+
+    setPhone(cleaned)
+    setMessage('')
+    setIsError(false)
+  }
+
+  /* =======================================================
+     CUSTOMER REGISTRATION
   ======================================================= */
 
   const submitRegistration = async (
@@ -393,7 +428,7 @@ export default function RegisterPage() {
   ): Promise<void> => {
     event.preventDefault()
 
-    if (loading || resending || verifying) return
+    if (formDisabled) return
 
     if (!validName(name)) {
       setIsError(true)
@@ -414,7 +449,7 @@ export default function RegisterPage() {
     if (!validPhone(phone)) {
       setIsError(true)
       setMessage(
-        'Please enter a valid phone number (7 to 15 digits).',
+        'Please enter a valid 10-digit phone number starting with 0.',
       )
       return
     }
@@ -437,7 +472,7 @@ export default function RegisterPage() {
           body: JSON.stringify({
             name: name.trim(),
             email: normalizeEmail(email),
-            phone: phone.trim(),
+            phone,
           }),
         },
       )
@@ -449,23 +484,23 @@ export default function RegisterPage() {
           setIsError(false)
 
           setMessage(
-            'This email is already registered. If you have verified it, open the Community Gallery and check your registered email. You do not need to register again.',
+            'This email is already registered. If verified, you can access the Community Gallery directly.',
           )
 
-          await Swal.fire({
+          const result = await Swal.fire({
             title: 'Already Registered',
             text:
-              'Your email is already registered. If it is verified, go directly to the Community Gallery and check your email to upload photos.',
+              'Your email is already registered. If verified, open the Community Gallery and check your email to upload photos.',
             icon: 'info',
             confirmButtonColor: '#a32722',
             confirmButtonText: 'Open Gallery',
             showCancelButton: true,
             cancelButtonText: 'Stay Here',
-          }).then(result => {
-            if (result.isConfirmed) {
-              redirectToGallery()
-            }
           })
+
+          if (result.isConfirmed) {
+            redirectToGallery()
+          }
 
           return
         }
@@ -479,12 +514,11 @@ export default function RegisterPage() {
 
       const registeredName = name.trim()
       const registeredEmail = normalizeEmail(email)
-      const registeredPhone = phone.trim()
 
       saveCustomerProfile({
         name: registeredName,
         email: registeredEmail,
-        phone: registeredPhone,
+        phone,
         verified: false,
       })
 
@@ -495,7 +529,10 @@ export default function RegisterPage() {
           'Registration received. Please check your email for the verification link.',
       )
 
-      if (data.delivery?.devVerificationUrl) {
+      if (
+        import.meta.env.DEV &&
+        data.delivery?.devVerificationUrl
+      ) {
         setDevVerifyUrl(
           data.delivery.devVerificationUrl,
         )
@@ -523,13 +560,11 @@ export default function RegisterPage() {
   }
 
   /* =======================================================
-     RESEND EMAIL VERIFICATION
-
-     POST /api/auth/resend-verification
+     RESEND VERIFICATION EMAIL
   ======================================================= */
 
   const handleResend = async (): Promise<void> => {
-    if (loading || resending || verifying) return
+    if (formDisabled) return
 
     if (!validEmail(email)) {
       setIsError(true)
@@ -574,7 +609,10 @@ export default function RegisterPage() {
           'If your email is awaiting verification, a new verification link will be sent.',
       )
 
-      if (data.delivery?.devVerificationUrl) {
+      if (
+        import.meta.env.DEV &&
+        data.delivery?.devVerificationUrl
+      ) {
         setDevVerifyUrl(
           data.delivery.devVerificationUrl,
         )
@@ -701,8 +739,14 @@ export default function RegisterPage() {
             </div>
           )}
 
-          <form onSubmit={submitRegistration}>
+          <form
+            onSubmit={submitRegistration}
+            noValidate
+          >
             <div className="zen-register-fields">
+
+              {/* FULL NAME */}
+
               <label className="field-label">
                 Full name
 
@@ -711,11 +755,7 @@ export default function RegisterPage() {
 
                   <input
                     value={name}
-                    disabled={
-                      loading ||
-                      resending ||
-                      verifying
-                    }
+                    disabled={formDisabled}
                     onChange={event => {
                       setName(event.target.value)
                       setMessage('')
@@ -729,6 +769,8 @@ export default function RegisterPage() {
                 </div>
               </label>
 
+              {/* PHONE NUMBER */}
+
               <label className="field-label">
                 Phone number
 
@@ -737,23 +779,28 @@ export default function RegisterPage() {
 
                   <input
                     value={phone}
-                    disabled={
-                      loading ||
-                      resending ||
-                      verifying
+                    disabled={formDisabled}
+                    onChange={event =>
+                      handlePhoneChange(event.target.value)
                     }
-                    onChange={event => {
-                      setPhone(event.target.value)
-                      setMessage('')
-                    }}
                     type="tel"
-                    inputMode="tel"
-                    autoComplete="tel"
-                    placeholder="+94 77 123 4567"
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    placeholder="0771234567"
+                    maxLength={10}
+                    minLength={10}
+                    pattern="0[0-9]{9}"
+                    title="Enter exactly 10 digits starting with 0"
                     required
                   />
                 </div>
+
+                <span className="mt-1 block text-xs text-[#a99b93]">
+                  Enter 10 digits, starting with 0.
+                </span>
               </label>
+
+              {/* EMAIL */}
 
               <label className="field-label zen-register-field-full">
                 Email address
@@ -763,11 +810,7 @@ export default function RegisterPage() {
 
                   <input
                     value={email}
-                    disabled={
-                      loading ||
-                      resending ||
-                      verifying
-                    }
+                    disabled={formDisabled}
                     onChange={event => {
                       setEmail(event.target.value)
                       setMessage('')
@@ -782,14 +825,12 @@ export default function RegisterPage() {
               </label>
             </div>
 
+            {/* REGISTER */}
+
             <button
               className="primary-pill zen-register-submit"
               type="submit"
-              disabled={
-                loading ||
-                resending ||
-                verifying
-              }
+              disabled={formDisabled}
             >
               <ShieldCheck size={15} />
 
@@ -800,13 +841,11 @@ export default function RegisterPage() {
                   : 'Register Customer'}
             </button>
 
+            {/* RESEND VERIFICATION */}
+
             <button
               type="button"
-              disabled={
-                resending ||
-                loading ||
-                verifying
-              }
+              disabled={formDisabled}
               onClick={() => {
                 void handleResend()
               }}
@@ -815,9 +854,7 @@ export default function RegisterPage() {
               <RefreshCw
                 size={12}
                 className={
-                  resending
-                    ? 'animate-spin'
-                    : ''
+                  resending ? 'animate-spin' : ''
                 }
               />
 
@@ -827,6 +864,8 @@ export default function RegisterPage() {
             </button>
           </form>
 
+          {/* MESSAGE */}
+
           {message && (
             <div
               className={`zen-register-message mt-3 flex items-center gap-2 rounded-xl p-2.5 text-xs ${
@@ -834,7 +873,7 @@ export default function RegisterPage() {
                   ? 'border border-red-200 bg-red-50 text-red-800'
                   : 'border border-emerald-200 bg-emerald-50 text-emerald-800'
               }`}
-              role="status"
+              role={isError ? 'alert' : 'status'}
             >
               {isError ? (
                 <ShieldAlert size={14} />
@@ -845,6 +884,8 @@ export default function RegisterPage() {
               <span>{message}</span>
             </div>
           )}
+
+          {/* DEVELOPMENT VERIFICATION LINK */}
 
           {devVerifyUrl && (
             <div className="mt-3 rounded-2xl border border-[#a32722]/15 bg-[#fff8ef] p-3 text-xs text-[#695950]">
@@ -860,6 +901,8 @@ export default function RegisterPage() {
               </a>
             </div>
           )}
+
+          {/* REGISTRATION STATUS */}
 
           <div
             className={`zen-register-status ${

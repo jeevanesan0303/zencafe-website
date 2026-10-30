@@ -9,7 +9,6 @@ import AddProduct from './pages/AddProduct'
 import Offers from './pages/Offers'
 import Games from './pages/Games'
 import Bookings from './pages/RoomBookings'
-import Gallery from './pages/Gallery'
 import Settings from './pages/Settings'
 
 import type { SettingsTab } from './pages/Settings'
@@ -29,7 +28,6 @@ export type AdminPage =
   | 'offers'
   | 'games'
   | 'bookings'
-  | 'gallery'
   | 'settings'
 
 /* ==========================================
@@ -202,18 +200,6 @@ export default function AdminApp() {
       case 'bookings':
         return (
           <Bookings
-            onNavigate={navigate}
-            query={query}
-          />
-        )
-
-      /* --------------------------------------
-         COMMUNITY GALLERY MODERATION
-      -------------------------------------- */
-
-      case 'gallery':
-        return (
-          <Gallery
             onNavigate={navigate}
             query={query}
           />

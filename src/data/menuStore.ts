@@ -183,50 +183,199 @@ const normalise = (item: MenuItem): MenuItem => {
   }
 }
 
+
 /* ==========================================
    CATALOG CACHE & BACKEND API SYNC
 ========================================== */
 
+const MENU_CACHE_TTL_MS = 15_000
+
 let catalogCache: MenuItem[] | null = null
-let fetchInFlight: Promise<MenuItem[]> | null = null
+let catalogLastFetchedAt = 0
 
-export async function loadMenuCatalog(
-  options?: { all?: boolean }
-): Promise<MenuItem[]> {
-  const query = options?.all ? '?all=true' : ''
-  const response = await fetch(`/api/products${query}`, {
-    headers: {
-      Accept: 'application/json',
-      ...getAdminAuthHeaders(),
-    },
-  })
+const catalogRequests = new Map<
+  string,
+  Promise<MenuItem[]>
+>()
 
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    throw new Error('Products API is unreachable or returned invalid response.')
-  }
+let catalogRequestGeneration = 0
 
-  const json = await response.json()
-  if (!response.ok || !json.success) {
-    throw new Error(json.error || `Server error: ${response.status}`)
-  }
+function menuIsBrowser(): boolean {
+  return typeof window !== 'undefined'
+}
 
-  const items = Array.isArray(json.data)
-    ? (json.data as MenuItem[]).map(normalise)
-    : []
-
-  catalogCache = items
-  writeLocalCache(items)
+function notifyMenuSubscribers(): void {
+  if (!menuIsBrowser()) return
 
   window.dispatchEvent(
     new CustomEvent(EVENT_NAME)
   )
+}
 
-  return items
+function menuCacheIsFresh(): boolean {
+  return (
+    catalogCache !== null &&
+    catalogLastFetchedAt > 0 &&
+    Date.now() - catalogLastFetchedAt <
+      MENU_CACHE_TTL_MS
+  )
+}
+
+function normaliseCatalog(
+  items: MenuItem[]
+): MenuItem[] {
+  return items.map(normalise)
+}
+
+function updateMenuCache(
+  items: MenuItem[],
+  serverConfirmed: boolean
+): MenuItem[] {
+  const next = normaliseCatalog(items)
+
+  catalogCache = next
+
+  catalogLastFetchedAt = serverConfirmed
+    ? Date.now()
+    : 0
+
+  writeLocalCache(next)
+  notifyMenuSubscribers()
+
+  return next
 }
 
 /* ==========================================
-   READ MENU
+   LOAD PRODUCTS FROM LIVE API
+========================================== */
+
+export async function loadMenuCatalog(
+  options?: { all?: boolean }
+): Promise<MenuItem[]> {
+  const all = options?.all === true
+  const requestKey = all ? 'all' : 'public'
+
+  const existing =
+    catalogRequests.get(requestKey)
+
+  if (existing) return existing
+
+  const generation = catalogRequestGeneration
+
+  const request = (async (): Promise<MenuItem[]> => {
+    const query = all ? '?all=true' : ''
+
+    const response = await fetch(
+      `/api/products${query}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...getAdminAuthHeaders(),
+        },
+        cache: 'no-store',
+      }
+    )
+
+    const contentType =
+      response.headers.get('content-type') || ''
+
+    if (
+      !contentType
+        .toLowerCase()
+        .includes('application/json')
+    ) {
+      throw new Error(
+        'Products API is unreachable or returned an invalid response.'
+      )
+    }
+
+    const json: unknown = await response.json()
+
+    if (
+      !json ||
+      typeof json !== 'object' ||
+      Array.isArray(json)
+    ) {
+      throw new Error(
+        'Products API returned an invalid response.'
+      )
+    }
+
+    const result = json as Record<string, unknown>
+
+    if (!response.ok || result.success !== true) {
+      throw new Error(
+        typeof result.error === 'string'
+          ? result.error
+          : `Products API error: ${response.status}`
+      )
+    }
+
+    if (!Array.isArray(result.data)) {
+      throw new Error(
+        'Products API response is missing its data array.'
+      )
+    }
+
+    const items = normaliseCatalog(
+      result.data as MenuItem[]
+    )
+
+    // An older request must not overwrite newer
+    // changes made after it started.
+    if (generation === catalogRequestGeneration) {
+      // The public list can be a filtered subset.
+      // Never replace a full admin catalog with it.
+      if (all || catalogCache === null) {
+        updateMenuCache(items, all)
+      } else if (!menuCacheIsFresh()) {
+        // Keep the public list available to consumers,
+        // but mark the shared cache as unverified.
+        updateMenuCache(items, false)
+      }
+    }
+
+    return items
+  })()
+
+  catalogRequests.set(requestKey, request)
+
+  try {
+    return await request
+  } finally {
+    if (
+      catalogRequests.get(requestKey) === request
+    ) {
+      catalogRequests.delete(requestKey)
+    }
+  }
+}
+
+/* ==========================================
+   REFRESH PRODUCTS
+
+   Use { all: true } in the admin dashboard.
+========================================== */
+
+export async function refreshMenuCatalog(
+  options?: {
+    all?: boolean
+    force?: boolean
+  }
+): Promise<MenuItem[]> {
+  const all = options?.all === true
+  const force = options?.force === true
+
+  if (!force && menuCacheIsFresh()) {
+    return catalogCache ?? []
+  }
+
+  return loadMenuCatalog({ all })
+}
+
+/* ==========================================
+   READ MENU SYNCHRONOUSLY
 ========================================== */
 
 export function readMenuCatalog(): MenuItem[] {
@@ -234,27 +383,37 @@ export function readMenuCatalog(): MenuItem[] {
     return catalogCache
   }
 
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        catalogCache = (parsed as MenuItem[]).map(normalise)
-        return catalogCache
-      }
-    }
-  } catch {
-    // Local storage parse error
-  }
+  if (menuIsBrowser()) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
 
-  // Trigger background load if running in browser
-  if (typeof window !== 'undefined' && !fetchInFlight) {
-    fetchInFlight = loadMenuCatalog().catch(() => []).finally(() => {
-      fetchInFlight = null
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw)
+
+        if (Array.isArray(parsed)) {
+          catalogCache = normaliseCatalog(
+            parsed as MenuItem[]
+          )
+        }
+      }
+    } catch {
+      // Ignore invalid browser cache.
+    }
+
+    // Always verify a restored cache against
+    // the live backend.
+    void refreshMenuCatalog({
+      all: false,
+      force: true,
+    }).catch(error => {
+      console.error(
+        '[Zen Menu] Background refresh failed:',
+        error
+      )
     })
   }
 
-  return []
+  return catalogCache ?? []
 }
 
 /* ==========================================
@@ -271,36 +430,23 @@ const isQuotaError = (error: unknown) =>
 function writeLocalCache(
   items: MenuItem[]
 ): void {
-  const payload = JSON.stringify(
-    items.map(normalise)
-  )
+  if (!menuIsBrowser()) return
+
+  const payload = JSON.stringify(items)
 
   try {
-    localStorage.setItem(STORAGE_KEY, payload)
+    localStorage.setItem(
+      STORAGE_KEY,
+      payload
+    )
   } catch (error) {
     if (!isQuotaError(error)) return
 
-    const previous =
-      localStorage.getItem(STORAGE_KEY)
-
-    localStorage.removeItem(STORAGE_KEY)
-
     try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        payload
-      )
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.setItem(STORAGE_KEY, payload)
     } catch {
-      try {
-        if (previous) {
-          localStorage.setItem(
-            STORAGE_KEY,
-            previous
-          )
-        }
-      } catch {
-        // Ignore restoration failure.
-      }
+      // Browser storage is optional.
     }
   }
 
@@ -310,23 +456,28 @@ function writeLocalCache(
       String(Date.now())
     )
   } catch {
-    // The catalog has already been saved.
+    // Ignore unavailable browser storage.
   }
 }
+
+/* ==========================================
+   WRITE MENU CACHE
+
+   This is a local UI update, not a database
+   write. Use the API mutation functions below
+   for persistent product changes.
+========================================== */
 
 export function writeMenuCatalog(
   items: MenuItem[]
 ): void {
-  catalogCache = items.map(normalise)
-  writeLocalCache(items)
+  catalogRequestGeneration++
 
-  window.dispatchEvent(
-    new CustomEvent(EVENT_NAME)
-  )
+  updateMenuCache(items, false)
 }
 
 /* ==========================================
-   ADD PRODUCT (POST /api/products)
+   ADD PRODUCT
 ========================================== */
 
 export async function addMenuProduct(
@@ -342,29 +493,49 @@ export async function addMenuProduct(
     body: JSON.stringify(product),
   })
 
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    throw new Error('Server returned non-JSON response while adding product.')
+  const json = await readProductMutationResponse(
+    response,
+    'adding'
+  )
+
+  if (
+    !json.data ||
+    typeof json.data !== 'object' ||
+    Array.isArray(json.data)
+  ) {
+    throw new Error(
+      'Product API did not return the saved product.'
+    )
   }
 
-  const json = await response.json()
-  if (!response.ok || !json.success) {
-    throw new Error(json.error || `Failed to add product (${response.status})`)
-  }
+  const savedProduct = normalise(
+    json.data as MenuItem
+  )
 
-  const savedProduct = normalise(json.data as MenuItem)
-  const current = readMenuCatalog()
   const next = [
-    ...current.filter(item => item.id !== savedProduct.id),
+    ...readMenuCatalog().filter(
+      item => item.id !== savedProduct.id
+    ),
     savedProduct,
   ]
 
   writeMenuCatalog(next)
+
+  await refreshMenuCatalog({
+    all: true,
+    force: true,
+  }).catch(error => {
+    console.warn(
+      '[Zen Menu] Post-create refresh failed:',
+      error
+    )
+  })
+
   return savedProduct
 }
 
 /* ==========================================
-   UPDATE PRODUCT (PUT /api/products/:id)
+   UPDATE PRODUCT
 ========================================== */
 
 export async function updateMenuProduct(
@@ -384,28 +555,52 @@ export async function updateMenuProduct(
     }
   )
 
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    throw new Error('Server returned non-JSON response while updating product.')
-  }
-
-  const json = await response.json()
-  if (!response.ok || !json.success) {
-    throw new Error(json.error || `Failed to update product (${response.status})`)
-  }
-
-  const updatedProduct = normalise(json.data as MenuItem)
-  const current = readMenuCatalog()
-  const next = current.map(item =>
-    item.id === id ? updatedProduct : item
+  const json = await readProductMutationResponse(
+    response,
+    'updating'
   )
 
+  if (
+    !json.data ||
+    typeof json.data !== 'object' ||
+    Array.isArray(json.data)
+  ) {
+    throw new Error(
+      'Product API did not return the updated product.'
+    )
+  }
+
+  const updatedProduct = normalise(
+    json.data as MenuItem
+  )
+
+  const current = readMenuCatalog()
+
+  const next = current.some(
+    item => item.id === id
+  )
+    ? current.map(item =>
+        item.id === id ? updatedProduct : item
+      )
+    : [...current, updatedProduct]
+
   writeMenuCatalog(next)
+
+  await refreshMenuCatalog({
+    all: true,
+    force: true,
+  }).catch(error => {
+    console.warn(
+      '[Zen Menu] Post-update refresh failed:',
+      error
+    )
+  })
+
   return updatedProduct
 }
 
 /* ==========================================
-   DELETE PRODUCT (DELETE /api/products/:id)
+   DELETE PRODUCT
 ========================================== */
 
 export async function deleteMenuProduct(
@@ -422,32 +617,107 @@ export async function deleteMenuProduct(
     }
   )
 
-  const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    throw new Error('Server returned non-JSON response while deleting product.')
-  }
+  await readProductMutationResponse(
+    response,
+    'deleting'
+  )
 
-  const json = await response.json()
-  if (!response.ok || !json.success) {
-    throw new Error(json.error || `Failed to delete product (${response.status})`)
-  }
+  writeMenuCatalog(
+    readMenuCatalog().filter(
+      item => item.id !== id
+    )
+  )
 
-  const current = readMenuCatalog()
-  const next = current.filter(item => item.id !== id)
-
-  writeMenuCatalog(next)
+  await refreshMenuCatalog({
+    all: true,
+    force: true,
+  }).catch(error => {
+    console.warn(
+      '[Zen Menu] Post-delete refresh failed:',
+      error
+    )
+  })
 }
 
 /* ==========================================
-   RESET MENU
+   API MUTATION RESPONSE HELPER
+========================================== */
+
+async function readProductMutationResponse(
+  response: Response,
+  operation: string
+): Promise<Record<string, unknown>> {
+  const contentType =
+    response.headers.get('content-type') || ''
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes('application/json')
+  ) {
+    throw new Error(
+      `Server returned a non-JSON response while ${operation} a product.`
+    )
+  }
+
+  const json: unknown = await response.json()
+
+  if (
+    !json ||
+    typeof json !== 'object' ||
+    Array.isArray(json)
+  ) {
+    throw new Error(
+      `Invalid API response while ${operation} a product.`
+    )
+  }
+
+  const result = json as Record<string, unknown>
+
+  if (!response.ok || result.success !== true) {
+    throw new Error(
+      typeof result.error === 'string'
+        ? result.error
+        : `Failed while ${operation} a product (${response.status}).`
+    )
+  }
+
+  return result
+}
+
+/* ==========================================
+   RESET LOCAL MENU CACHE
+
+   Does not reset PostgreSQL.
 ========================================== */
 
 export function resetMenuCatalog(): void {
-  writeMenuCatalog(
-    DEFAULT_MENU_ITEMS.map(
-      item => ({ ...item })
-    )
-  )
+  catalogRequestGeneration++
+  catalogCache = null
+  catalogLastFetchedAt = 0
+
+  if (menuIsBrowser()) {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(VERSION_KEY)
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+
+  notifyMenuSubscribers()
+
+  if (menuIsBrowser()) {
+    void refreshMenuCatalog({
+      all: false,
+      force: true,
+    }).catch(error => {
+      console.error(
+        '[Zen Menu] Reset refresh failed:',
+        error
+      )
+    })
+  }
 }
 
 /* ==========================================
@@ -467,9 +737,7 @@ export function getVisibleMenu(
       (a, b) =>
         Number(b.featured) -
           Number(a.featured) ||
-        a.createdAt.localeCompare(
-          b.createdAt
-        )
+        a.createdAt.localeCompare(b.createdAt)
     )
 }
 
@@ -480,41 +748,71 @@ export function getVisibleMenu(
 export function subscribeMenuCatalog(
   callback: () => void
 ): () => void {
-  const local = () => callback()
+  if (!menuIsBrowser()) {
+    return () => {}
+  }
 
-  const storage = (
-    event: StorageEvent
-  ) => {
+  const onCustom = () => callback()
+
+  const onStorage = (event: StorageEvent) => {
     if (
-      event.key === STORAGE_KEY ||
-      event.key === VERSION_KEY
+      event.key !== STORAGE_KEY &&
+      event.key !== VERSION_KEY
     ) {
-      callback()
+      return
     }
+
+    try {
+      const raw = localStorage.getItem(
+        STORAGE_KEY
+      )
+
+      catalogCache = raw
+        ? normaliseCatalog(
+            JSON.parse(raw) as MenuItem[]
+          )
+        : null
+    } catch {
+      catalogCache = null
+    }
+
+    catalogLastFetchedAt = 0
+    callback()
+
+    void refreshMenuCatalog({
+      all: false,
+      force: true,
+    }).catch(error => {
+      console.error(
+        '[Zen Menu] Cross-tab refresh failed:',
+        error
+      )
+    })
   }
 
   window.addEventListener(
     EVENT_NAME,
-    local
+    onCustom
   )
 
   window.addEventListener(
     'storage',
-    storage
+    onStorage
   )
 
   return () => {
     window.removeEventListener(
       EVENT_NAME,
-      local
+      onCustom
     )
 
     window.removeEventListener(
       'storage',
-      storage
+      onStorage
     )
   }
 }
+
 
 /* ==========================================
    IMAGE FILE HELPERS

@@ -79,21 +79,51 @@ const EMPTY_DRAFT: OfferDraft = {
 }
 
 /* ==========================================
-   HELPERS
+   DATE HELPERS
 ========================================== */
 
-function getToday() {
-  const now = new Date()
+function getToday(): string {
+  const parts = new Intl.DateTimeFormat(
+    'en-GB',
+    {
+      timeZone: 'Asia/Colombo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }
+  ).formatToParts(new Date())
 
-  const local = new Date(
-    now.getTime() -
-      now.getTimezoneOffset() * 60000
-  )
+  const year =
+    parts.find(part => part.type === 'year')
+      ?.value || ''
 
-  return local.toISOString().slice(0, 10)
+  const month =
+    parts.find(part => part.type === 'month')
+      ?.value || ''
+
+  const day =
+    parts.find(part => part.type === 'day')
+      ?.value || ''
+
+  return `${year}-${month}-${day}`
 }
 
-function getOfferStatus(offer: AdminOffer) {
+function isValidDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false
+  }
+
+  const date = new Date(`${value}T00:00:00Z`)
+
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  )
+}
+
+function getOfferStatus(
+  offer: AdminOffer
+): 'active' | 'inactive' | 'scheduled' | 'expired' {
   const today = getToday()
 
   if (
@@ -117,34 +147,33 @@ function getOfferStatus(offer: AdminOffer) {
   return 'active'
 }
 
-function formatDiscount(offer: AdminOffer) {
+function formatDiscount(offer: AdminOffer): string {
+  const amount = Number(offer.discountValue) || 0
+
   return offer.discountType === 'percentage'
-    ? `${offer.discountValue}% OFF`
-    : `LKR ${offer.discountValue.toLocaleString(
-        'en-LK'
-      )} OFF`
+    ? `${amount}% OFF`
+    : `LKR ${amount.toLocaleString('en-LK')} OFF`
 }
 
-function formatDate(value: string) {
+function formatDate(value: string): string {
   if (!value) return '—'
 
-  const date = new Date(
-    `${value}T00:00:00`
-  )
+  if (!isValidDate(value)) return value
 
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      })
+  const date = new Date(`${value}T00:00:00Z`)
+
+  return date.toLocaleDateString('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 function getErrorMessage(
   error: unknown,
   fallback: string
-) {
+): string {
   return error instanceof Error
     ? error.message
     : fallback
@@ -154,21 +183,19 @@ function getOfferDraft(
   offer: AdminOffer
 ): OfferDraft {
   return {
-    title: offer.title,
-    description: offer.description,
-    code: offer.code,
+    title: offer.title || '',
+    description: offer.description || '',
+    code: offer.code || '',
     discountType: offer.discountType,
-    discountValue: String(
-      offer.discountValue
-    ),
-    startDate: offer.startDate,
-    endDate: offer.endDate,
+    discountValue: String(offer.discountValue),
+    startDate: offer.startDate || '',
+    endDate: offer.endDate || '',
     active: offer.active,
   }
 }
 
 /* ==========================================
-   OFFER IMAGE PROCESSING
+   IMAGE PROCESSING
 ========================================== */
 
 async function prepareOfferImage(
@@ -192,8 +219,7 @@ async function prepareOfferImage(
     )
   }
 
-  const objectUrl =
-    URL.createObjectURL(file)
+  const objectUrl = URL.createObjectURL(file)
 
   try {
     const image =
@@ -214,8 +240,7 @@ async function prepareOfferImage(
         }
       )
 
-    const canvas =
-      document.createElement('canvas')
+    const canvas = document.createElement('canvas')
 
     const scale = Math.min(
       1,
@@ -228,20 +253,15 @@ async function prepareOfferImage(
 
     canvas.width = Math.max(
       1,
-      Math.round(
-        image.naturalWidth * scale
-      )
+      Math.round(image.naturalWidth * scale)
     )
 
     canvas.height = Math.max(
       1,
-      Math.round(
-        image.naturalHeight * scale
-      )
+      Math.round(image.naturalHeight * scale)
     )
 
-    const context =
-      canvas.getContext('2d')
+    const context = canvas.getContext('2d')
 
     if (!context) {
       throw new Error(
@@ -276,7 +296,7 @@ async function prepareOfferImage(
 }
 
 /* ==========================================
-   OFFERS PAGE
+   OFFERS COMPONENT
 ========================================== */
 
 export default function Offers({
@@ -284,118 +304,144 @@ export default function Offers({
   query = '',
 }: Props) {
   const [offers, setOffers] =
-    useState<AdminOffer[]>(
-      () => readAdminOffers()
-    )
+    useState<AdminOffer[]>(() => readAdminOffers())
 
   const [filter, setFilter] =
     useState<StatusFilter>('all')
 
-  const [search, setSearch] =
-    useState('')
+  const [search, setSearch] = useState('')
 
   const [editing, setEditing] =
     useState<AdminOffer | null>(null)
 
-  const [formOpen, setFormOpen] =
-    useState(false)
+  const [formOpen, setFormOpen] = useState(false)
 
   const [draft, setDraft] =
-    useState<OfferDraft>({
-      ...EMPTY_DRAFT,
-    })
+    useState<OfferDraft>({ ...EMPTY_DRAFT })
 
-  const [offerImage, setOfferImage] =
-    useState('')
-
-  const [imageError, setImageError] =
-    useState('')
-
-  const [imageLoading, setImageLoading] =
-    useState(false)
-
-  const [saving, setSaving] =
-    useState(false)
+  const [offerImage, setOfferImage] = useState('')
+  const [imageError, setImageError] = useState('')
+  const [imageLoading, setImageLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const [busyId, setBusyId] =
     useState<string | null>(null)
 
-  const [error, setError] =
-    useState('')
+  const [error, setError] = useState('')
+  const [formError, setFormError] = useState('')
 
-  const [formError, setFormError] =
-    useState('')
+  const [today, setToday] = useState(getToday)
 
-  const fileInputRef =
-    useRef<HTMLInputElement>(null)
-
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const imageRequestRef = useRef(0)
-
   const formLockRef = useRef(false)
 
   /* ==========================================
-     STORE SUBSCRIPTION
+     DATA SYNCHRONIZATION
   ========================================== */
 
   useEffect(() => {
-    loadAdminOffers()
-      .then(items => setOffers(items))
-      .catch(() => {})
+    let mounted = true
 
-    return subscribeAdminOffers(() => {
-      setOffers(readAdminOffers())
-    })
-  }, [])
+    const sync = () => {
+      if (mounted) {
+        setOffers(readAdminOffers())
+        setToday(getToday())
+      }
+    }
 
-  useEffect(() => {
+    const refresh = () => {
+      setToday(getToday())
+
+      void loadAdminOffers()
+        .then(items => {
+          if (mounted) {
+            setOffers(items)
+            setError('')
+          }
+        })
+        .catch(caughtError => {
+          if (mounted) {
+            setError(
+              getErrorMessage(
+                caughtError,
+                'Unable to refresh promotions.'
+              )
+            )
+          }
+        })
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refresh()
+      }
+    }
+
+    refresh()
+
+    const unsubscribe = subscribeAdminOffers(sync)
+
+    window.addEventListener('focus', refresh)
+
+    document.addEventListener(
+      'visibilitychange',
+      onVisibilityChange
+    )
+
+    const interval = window.setInterval(
+      refresh,
+      60000
+    )
+
     return () => {
+      mounted = false
+      unsubscribe()
+
+      window.removeEventListener('focus', refresh)
+
+      document.removeEventListener(
+        'visibilitychange',
+        onVisibilityChange
+      )
+
+      window.clearInterval(interval)
+
       imageRequestRef.current += 1
     }
   }, [])
 
   /* ==========================================
-     STATISTICS
+     OFFER STATISTICS
   ========================================== */
 
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    const statuses = offers.map(getOfferStatus)
+
+    return {
       total: offers.length,
-
-      active: offers.filter(
-        offer =>
-          getOfferStatus(offer) ===
-          'active'
+      active: statuses.filter(
+        status => status === 'active'
       ).length,
-
-      scheduled: offers.filter(
-        offer =>
-          getOfferStatus(offer) ===
-          'scheduled'
+      scheduled: statuses.filter(
+        status => status === 'scheduled'
       ).length,
-
-      expired: offers.filter(
-        offer =>
-          getOfferStatus(offer) ===
-          'expired'
+      expired: statuses.filter(
+        status => status === 'expired'
       ).length,
-    }),
-    [offers]
-  )
+    }
+  }, [offers, today])
 
   /* ==========================================
      FILTERED OFFERS
   ========================================== */
 
   const filtered = useMemo(() => {
-    const local =
-      search.trim().toLowerCase()
-
-    const global =
-      query.trim().toLowerCase()
+    const local = search.trim().toLowerCase()
+    const global = query.trim().toLowerCase()
 
     return offers.filter(offer => {
-      const status =
-        getOfferStatus(offer)
+      const status = getOfferStatus(offer)
 
       const matchesStatus =
         filter === 'all' ||
@@ -414,43 +460,59 @@ export default function Offers({
 
       return (
         matchesStatus &&
-        (!local ||
-          text.includes(local)) &&
-        (!global ||
-          text.includes(global))
+        (!local || text.includes(local)) &&
+        (!global || text.includes(global))
       )
     })
-  }, [offers, filter, search, query])
+  }, [offers, filter, search, query, today])
+
+  /* ==========================================
+     DATE RESTRICTIONS
+  ========================================== */
+
+  const minimumStartDate = today
+
+  const minimumEndDate =
+    draft.startDate && draft.startDate > today
+      ? draft.startDate
+      : today
+
+  const hasHistoricalStartDate = Boolean(
+    editing &&
+    draft.startDate &&
+    draft.startDate < today &&
+    draft.startDate === editing.startDate
+  )
+
+  const hasHistoricalEndDate = Boolean(
+    editing &&
+    draft.endDate &&
+    draft.endDate < today &&
+    draft.endDate === editing.endDate
+  )
 
   /* ==========================================
      UNSAVED CHANGES
   ========================================== */
 
-  const hasUnsavedChanges =
-    useMemo(() => {
-      if (!formOpen) return false
+  const hasUnsavedChanges = useMemo(() => {
+    if (!formOpen) return false
 
-      const originalDraft = editing
-        ? getOfferDraft(editing)
-        : EMPTY_DRAFT
+    const originalDraft = editing
+      ? getOfferDraft(editing)
+      : EMPTY_DRAFT
 
-      const originalImage =
-        editing?.image || ''
+    const originalImage = editing?.image || ''
 
-      return (
-        JSON.stringify(draft) !==
-          JSON.stringify(originalDraft) ||
-        offerImage !== originalImage
-      )
-    }, [
-      formOpen,
-      editing,
-      draft,
-      offerImage,
-    ])
+    return (
+      JSON.stringify(draft) !==
+        JSON.stringify(originalDraft) ||
+      offerImage !== originalImage
+    )
+  }, [formOpen, editing, draft, offerImage])
 
   /* ==========================================
-     RESET / CLOSE FORM
+     FORM RESET
   ========================================== */
 
   function resetForm() {
@@ -470,10 +532,7 @@ export default function Offers({
   }
 
   async function closeForm() {
-    if (
-      saving ||
-      formLockRef.current
-    ) {
+    if (saving || formLockRef.current) {
       return
     }
 
@@ -481,12 +540,11 @@ export default function Offers({
 
     try {
       if (hasUnsavedChanges) {
-        const confirmed =
-          await AdminAlert.confirm(
-            'Discard Offer Changes?',
-            'You have unsaved promotion details. Closing this form will discard your changes.',
-            'Yes, Discard'
-          )
+        const confirmed = await AdminAlert.confirm(
+          'Discard Offer Changes?',
+          'You have unsaved promotion details. Closing this form will discard your changes.',
+          'Yes, Discard'
+        )
 
         if (!confirmed) return
       }
@@ -498,7 +556,7 @@ export default function Offers({
   }
 
   /* ==========================================
-     OPEN CREATE FORM
+     OPEN CREATE / EDIT
   ========================================== */
 
   function openCreate() {
@@ -506,6 +564,7 @@ export default function Offers({
 
     imageRequestRef.current += 1
 
+    setToday(getToday())
     setEditing(null)
     setDraft({ ...EMPTY_DRAFT })
     setOfferImage('')
@@ -515,15 +574,12 @@ export default function Offers({
     setFormOpen(true)
   }
 
-  /* ==========================================
-     OPEN EDIT FORM
-  ========================================== */
-
   function openEdit(offer: AdminOffer) {
     if (saving || busyId) return
 
     imageRequestRef.current += 1
 
+    setToday(getToday())
     setEditing(offer)
     setDraft(getOfferDraft(offer))
     setOfferImage(offer.image || '')
@@ -534,12 +590,10 @@ export default function Offers({
   }
 
   /* ==========================================
-     UPDATE FORM FIELD
+     UPDATE FORM FIELDS
   ========================================== */
 
-  function updateDraft<
-    K extends keyof OfferDraft
-  >(
+  function updateDraft<K extends keyof OfferDraft>(
     key: K,
     value: OfferDraft[K]
   ) {
@@ -551,20 +605,86 @@ export default function Offers({
     setFormError('')
   }
 
+  function updateStartDate(value: string) {
+    const currentToday = getToday()
+
+    setToday(currentToday)
+
+    if (value && !isValidDate(value)) {
+      setFormError('Please select a valid start date.')
+      return
+    }
+
+    if (value && value < currentToday) {
+      setFormError(
+        'Previous dates cannot be selected. Choose today or a future date.'
+      )
+      return
+    }
+
+    setDraft(previous => {
+      const minimumEnd =
+        value && value > currentToday
+          ? value
+          : currentToday
+
+      return {
+        ...previous,
+        startDate: value,
+        endDate:
+          previous.endDate &&
+          previous.endDate < minimumEnd
+            ? ''
+            : previous.endDate,
+      }
+    })
+
+    setFormError('')
+  }
+
+  function updateEndDate(value: string) {
+    const currentToday = getToday()
+
+    setToday(currentToday)
+
+    const minimum =
+      draft.startDate &&
+      draft.startDate > currentToday
+        ? draft.startDate
+        : currentToday
+
+    if (value && !isValidDate(value)) {
+      setFormError('Please select a valid end date.')
+      return
+    }
+
+    if (value && value < minimum) {
+      setFormError(
+        'End date must be today or later and cannot be before the start date.'
+      )
+      return
+    }
+
+    setDraft(previous => ({
+      ...previous,
+      endDate: value,
+    }))
+
+    setFormError('')
+  }
+
   /* ==========================================
-     UPLOAD OFFER IMAGE
+     IMAGE UPLOAD
   ========================================== */
 
   async function handleOfferImage(
     event: ChangeEvent<HTMLInputElement>
   ) {
-    const file =
-      event.target.files?.[0]
+    const file = event.target.files?.[0]
 
     if (!file || saving) return
 
-    const requestId =
-      ++imageRequestRef.current
+    const requestId = ++imageRequestRef.current
 
     setImageLoading(true)
     setImageError('')
@@ -576,8 +696,7 @@ export default function Offers({
         await prepareOfferImage(file)
 
       if (
-        requestId !==
-        imageRequestRef.current
+        requestId !== imageRequestRef.current
       ) {
         return
       }
@@ -586,8 +705,7 @@ export default function Offers({
       setFormError('')
     } catch (caughtError) {
       if (
-        requestId !==
-        imageRequestRef.current
+        requestId !== imageRequestRef.current
       ) {
         return
       }
@@ -605,33 +723,23 @@ export default function Offers({
       )
     } finally {
       if (
-        requestId ===
-        imageRequestRef.current
+        requestId === imageRequestRef.current
       ) {
         setImageLoading(false)
       }
     }
   }
 
-  /* ==========================================
-     REMOVE OFFER IMAGE
-  ========================================== */
-
   async function removeOfferImage() {
-    if (
-      !offerImage ||
-      saving ||
-      imageLoading
-    ) {
+    if (!offerImage || saving || imageLoading) {
       return
     }
 
-    const confirmed =
-      await AdminAlert.confirm(
-        'Remove Offer Image?',
-        'The promotional image will be removed from this offer when you save your changes.',
-        'Yes, Remove'
-      )
+    const confirmed = await AdminAlert.confirm(
+      'Remove Offer Image?',
+      'The promotional image will be removed from this offer when you save your changes.',
+      'Yes, Remove'
+    )
 
     if (!confirmed) return
 
@@ -656,10 +764,7 @@ export default function Offers({
   ) {
     setFormError(message)
 
-    await AdminAlert.warning(
-      title,
-      message
-    )
+    await AdminAlert.warning(title, message)
   }
 
   /* ==========================================
@@ -701,16 +806,76 @@ export default function Offers({
       draft.discountValue.trim() === '' ||
       !Number.isFinite(discountValue) ||
       discountValue <= 0 ||
-      (draft.discountType ===
-        'percentage' &&
+      (draft.discountType === 'percentage' &&
         discountValue > 100)
     ) {
       await showValidationError(
         'Invalid Discount',
-        draft.discountType ===
-          'percentage'
-          ? 'Please enter a percentage between 0 and 100.'
+        draft.discountType === 'percentage'
+          ? 'Please enter a percentage greater than 0 and no more than 100.'
           : 'Please enter a valid discount amount in LKR.'
+      )
+      return
+    }
+
+    /* ======================================
+       DATE VALIDATION
+    ====================================== */
+
+    const currentToday = getToday()
+
+    setToday(currentToday)
+
+    if (
+      draft.startDate &&
+      !isValidDate(draft.startDate)
+    ) {
+      await showValidationError(
+        'Invalid Start Date',
+        'Please select a valid start date.'
+      )
+      return
+    }
+
+    if (
+      draft.endDate &&
+      !isValidDate(draft.endDate)
+    ) {
+      await showValidationError(
+        'Invalid End Date',
+        'Please select a valid end date.'
+      )
+      return
+    }
+
+    const startDateChanged =
+      !editing ||
+      draft.startDate !== editing.startDate
+
+    const endDateChanged =
+      !editing ||
+      draft.endDate !== editing.endDate
+
+    if (
+      draft.startDate &&
+      draft.startDate < currentToday &&
+      startDateChanged
+    ) {
+      await showValidationError(
+        'Invalid Start Date',
+        'Start date cannot be earlier than today. Please select today or a future date.'
+      )
+      return
+    }
+
+    if (
+      draft.endDate &&
+      draft.endDate < currentToday &&
+      endDateChanged
+    ) {
+      await showValidationError(
+        'Invalid End Date',
+        'End date cannot be earlier than today.'
       )
       return
     }
@@ -727,41 +892,22 @@ export default function Offers({
       return
     }
 
+    /* ======================================
+       SAVE THROUGH EXISTING API STORE
+    ====================================== */
+
     const isEditing = Boolean(editing)
 
-    const offer: AdminOffer = {
-      id:
-        editing?.id ||
-        crypto.randomUUID(),
-
+    const payload = {
       title,
-
-      description:
-        draft.description.trim(),
-
-      code:
-        draft.code.trim().toUpperCase(),
-
-      discountType:
-        draft.discountType,
-
+      description: draft.description.trim(),
+      code: draft.code.trim().toUpperCase(),
+      discountType: draft.discountType,
       discountValue,
-
-      startDate:
-        draft.startDate,
-
-      endDate:
-        draft.endDate,
-
-      active:
-        draft.active,
-
-      createdAt:
-        editing?.createdAt ||
-        new Date().toISOString(),
-
-      image:
-        offerImage,
+      startDate: draft.startDate,
+      endDate: draft.endDate,
+      active: draft.active,
+      image: offerImage,
     }
 
     formLockRef.current = true
@@ -769,30 +915,13 @@ export default function Offers({
     setFormError('')
 
     try {
-      if (isEditing && editing) {
-        await updateAdminOffer(editing.id, {
-          title,
-          description: draft.description.trim(),
-          code: draft.code.trim().toUpperCase(),
-          discountType: draft.discountType,
-          discountValue,
-          startDate: draft.startDate,
-          endDate: draft.endDate,
-          active: draft.active,
-          image: offerImage,
-        })
+      if (editing) {
+        await updateAdminOffer(
+          editing.id,
+          payload
+        )
       } else {
-        await createAdminOffer({
-          title,
-          description: draft.description.trim(),
-          code: draft.code.trim().toUpperCase(),
-          discountType: draft.discountType,
-          discountValue,
-          startDate: draft.startDate,
-          endDate: draft.endDate,
-          active: draft.active,
-          image: offerImage,
-        })
+        await createAdminOffer(payload)
       }
 
       resetForm()
@@ -824,29 +953,25 @@ export default function Offers({
   }
 
   /* ==========================================
-     ENABLE / DISABLE OFFER
+     ENABLE / DISABLE
   ========================================== */
 
-  async function toggleOffer(
-    offer: AdminOffer
-  ) {
+  async function toggleOffer(offer: AdminOffer) {
     if (busyId || saving) return
 
-    const nextActive =
-      !offer.active
+    const nextActive = !offer.active
 
-    const confirmed =
-      await AdminAlert.confirm(
-        nextActive
-          ? 'Enable Promotion?'
-          : 'Disable Promotion?',
-        nextActive
-          ? `"${offer.title}" will be enabled. Its dates will still determine when it runs.`
-          : `"${offer.title}" will be disabled and no longer be active.`,
-        nextActive
-          ? 'Yes, Enable'
-          : 'Yes, Disable'
-      )
+    const confirmed = await AdminAlert.confirm(
+      nextActive
+        ? 'Enable Promotion?'
+        : 'Disable Promotion?',
+      nextActive
+        ? `"${offer.title}" will be enabled. Its dates will still determine when it runs.`
+        : `"${offer.title}" will be disabled and no longer be active.`,
+      nextActive
+        ? 'Yes, Enable'
+        : 'Yes, Disable'
+    )
 
     if (!confirmed) return
 
@@ -885,9 +1010,7 @@ export default function Offers({
      DELETE OFFER
   ========================================== */
 
-  async function deleteOffer(
-    offer: AdminOffer
-  ) {
+  async function deleteOffer(offer: AdminOffer) {
     if (busyId || saving) return
 
     const confirmed =
@@ -931,61 +1054,48 @@ export default function Offers({
       {/* BREADCRUMB */}
 
       <div className="za-products-breadcrumb">
-
         <button
           type="button"
-          onClick={() =>
-            onNavigate('dashboard')
-          }
+          onClick={() => onNavigate('dashboard')}
         >
           Dashboard
         </button>
 
         <span>/</span>
 
-        <strong>
-          Offers & Promotions
-        </strong>
-
+        <strong>Offers & Promotions</strong>
       </div>
 
       {/* PAGE HEADER */}
 
       <div className="za-products-page-head">
-
         <div>
           <p className="za-kicker">
             PROMOTION MANAGEMENT
           </p>
 
-          <h1>
-            Offers & Promotions
-          </h1>
+          <h1>Offers & Promotions</h1>
 
           <p>
-            Create special offers and
-            manage your café promotions.
+            Create special offers and manage
+            your café promotions.
           </p>
         </div>
 
         <button
           type="button"
           className="za-primary"
-          disabled={
-            saving || busyId !== null
-          }
+          disabled={saving || busyId !== null}
           onClick={openCreate}
         >
           <Plus size={18} />
           Create New Offer
         </button>
-
       </div>
 
       {/* SUMMARY CARDS */}
 
       <div className="za-product-summary">
-
         <div className="za-product-summary-card">
           <span>Total Offers</span>
           <strong>{stats.total}</strong>
@@ -1009,10 +1119,9 @@ export default function Offers({
           <strong>{stats.expired}</strong>
           <small>Past promotions</small>
         </div>
-
       </div>
 
-      {/* ERROR */}
+      {/* PAGE ERROR */}
 
       {error && (
         <p
@@ -1026,9 +1135,7 @@ export default function Offers({
       {/* PROMOTIONS TABLE */}
 
       <section className="za-product-management-card">
-
         <div className="za-product-management-top">
-
           <div>
             <h2>
               <Gift size={24} />
@@ -1036,57 +1143,41 @@ export default function Offers({
             </h2>
 
             <p>
-              Manage discount codes,
-              availability and offer dates.
+              Manage discount codes, availability
+              and offer dates.
             </p>
           </div>
 
           <span className="za-products-count">
             {filtered.length} offers
           </span>
-
         </div>
 
         {/* FILTERS */}
 
         <div className="za-product-management-filters">
-
           <div className="za-filter-pills">
-
             {([
               ['all', 'All Offers'],
               ['active', 'Active'],
-              [
-                'inactive',
-                'Inactive / Upcoming',
-              ],
+              ['inactive', 'Inactive / Upcoming'],
               ['expired', 'Expired'],
-            ] as const).map(
-              ([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={
-                    filter === value
-                      ? 'active'
-                      : ''
-                  }
-                  onClick={() =>
-                    setFilter(value)
-                  }
-                  aria-pressed={
-                    filter === value
-                  }
-                >
-                  {label}
-                </button>
-              )
-            )}
-
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={
+                  filter === value ? 'active' : ''
+                }
+                onClick={() => setFilter(value)}
+                aria-pressed={filter === value}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           <label className="za-product-search za-management-search">
-
             <Search size={17} />
 
             <input
@@ -1097,17 +1188,13 @@ export default function Offers({
                 setSearch(event.target.value)
               }
             />
-
           </label>
-
         </div>
 
         {/* TABLE */}
 
         <div className="za-table-wrap">
-
           <table className="za-table za-management-table">
-
             <thead>
               <tr>
                 <th>Promotion</th>
@@ -1120,21 +1207,14 @@ export default function Offers({
             </thead>
 
             <tbody>
-
               {filtered.map(offer => {
-                const status =
-                  getOfferStatus(offer)
+                const status = getOfferStatus(offer)
 
                 return (
                   <tr key={offer.id}>
-
-                    {/* PROMOTION */}
-
                     <td>
                       <div className="za-management-product">
-
                         <div className="za-offer-table-icon">
-
                           {offer.image ? (
                             <img
                               src={offer.image}
@@ -1144,60 +1224,39 @@ export default function Offers({
                           ) : (
                             <Tag size={21} />
                           )}
-
                         </div>
 
                         <div>
-                          <strong>
-                            {offer.title}
-                          </strong>
-
+                          <strong>{offer.title}</strong>
                           <small>
                             {offer.description ||
                               'No description'}
                           </small>
                         </div>
-
                       </div>
                     </td>
-
-                    {/* DISCOUNT */}
 
                     <td className="za-management-price">
                       {formatDiscount(offer)}
                     </td>
 
-                    {/* PROMO CODE */}
-
                     <td>
                       <span className="za-offer-code">
-                        {offer.code ||
-                          'No code'}
+                        {offer.code || 'No code'}
                       </span>
                     </td>
 
-                    {/* DATES */}
-
                     <td>
                       <div className="za-offer-dates">
-
                         <span>
-                          {formatDate(
-                            offer.startDate
-                          )}
+                          {formatDate(offer.startDate)}
                         </span>
 
                         <small>
-                          to{' '}
-                          {formatDate(
-                            offer.endDate
-                          )}
+                          to {formatDate(offer.endDate)}
                         </small>
-
                       </div>
                     </td>
-
-                    {/* STATUS */}
 
                     <td>
                       <button
@@ -1208,8 +1267,7 @@ export default function Offers({
                             : ''
                         }`}
                         disabled={
-                          busyId !== null ||
-                          saving
+                          busyId !== null || saving
                         }
                         onClick={() => {
                           void toggleOffer(offer)
@@ -1222,30 +1280,22 @@ export default function Offers({
                           <EyeOff size={15} />
                         )}
 
-                        {status
-                          .charAt(0)
-                          .toUpperCase() +
+                        {status.charAt(0).toUpperCase() +
                           status.slice(1)}
                       </button>
                     </td>
 
-                    {/* ACTIONS */}
-
                     <td>
                       <div className="za-table-actions">
-
                         <button
                           type="button"
                           className="za-row-action"
                           title={`Edit ${offer.title}`}
                           aria-label={`Edit ${offer.title}`}
                           disabled={
-                            busyId !== null ||
-                            saving
+                            busyId !== null || saving
                           }
-                          onClick={() =>
-                            openEdit(offer)
-                          }
+                          onClick={() => openEdit(offer)}
                         >
                           <Pencil size={16} />
                         </button>
@@ -1256,8 +1306,7 @@ export default function Offers({
                           title={`Delete ${offer.title}`}
                           aria-label={`Delete ${offer.title}`}
                           disabled={
-                            busyId !== null ||
-                            saving
+                            busyId !== null || saving
                           }
                           onClick={() => {
                             void deleteOffer(offer)
@@ -1265,38 +1314,27 @@ export default function Offers({
                         >
                           <Trash2 size={16} />
                         </button>
-
                       </div>
                     </td>
-
                   </tr>
                 )
               })}
-
             </tbody>
           </table>
 
-          {/* EMPTY STATE */}
-
           {filtered.length === 0 && (
             <div className="za-management-empty">
-
               <Gift size={32} />
 
-              <h3>
-                No promotions found
-              </h3>
+              <h3>No promotions found</h3>
 
               <p>
-                Create your first offer
-                or adjust the filters.
+                Create your first offer or adjust
+                the filters.
               </p>
-
             </div>
           )}
-
         </div>
-
       </section>
 
       {/* CREATE / EDIT MODAL */}
@@ -1307,8 +1345,7 @@ export default function Offers({
           role="presentation"
           onMouseDown={event => {
             if (
-              event.target ===
-              event.currentTarget
+              event.target === event.currentTarget
             ) {
               void closeForm()
             }
@@ -1320,11 +1357,9 @@ export default function Offers({
             aria-modal="true"
             aria-labelledby="za-offer-dialog-title"
           >
-
             {/* MODAL HEADER */}
 
             <div className="za-edit-dialog-head">
-
               <div>
                 <p className="za-kicker">
                   PROMOTION MANAGEMENT
@@ -1348,15 +1383,11 @@ export default function Offers({
               >
                 <X size={22} />
               </button>
-
             </div>
 
-            {/* FORM */}
+            {/* OFFER FORM */}
 
-            <form
-              onSubmit={saveOffer}
-              noValidate
-            >
+            <form onSubmit={saveOffer} noValidate>
 
               {/* TITLE */}
 
@@ -1400,10 +1431,8 @@ export default function Offers({
               {/* IMAGE UPLOAD */}
 
               <div className="za-offer-image-section">
-
                 <label className="za-offer-image-label">
-                  Offer Image /
-                  Promotional Banner
+                  Offer Image / Promotional Banner
                 </label>
 
                 <input
@@ -1411,18 +1440,14 @@ export default function Offers({
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   hidden
-                  disabled={
-                    imageLoading || saving
-                  }
+                  disabled={imageLoading || saving}
                   onChange={handleOfferImage}
                 />
 
                 <button
                   type="button"
                   className="za-offer-image-upload"
-                  disabled={
-                    imageLoading || saving
-                  }
+                  disabled={imageLoading || saving}
                   onClick={() =>
                     fileInputRef.current?.click()
                   }
@@ -1443,8 +1468,7 @@ export default function Offers({
                       </strong>
 
                       <small>
-                        JPG, PNG or WEBP ·
-                        Max 5 MB
+                        JPG, PNG or WEBP · Max 5 MB
                       </small>
                     </>
                   )}
@@ -1452,12 +1476,9 @@ export default function Offers({
 
                 {offerImage && (
                   <div className="za-offer-image-actions">
-
                     <button
                       type="button"
-                      disabled={
-                        imageLoading || saving
-                      }
+                      disabled={imageLoading || saving}
                       onClick={() =>
                         fileInputRef.current?.click()
                       }
@@ -1468,9 +1489,7 @@ export default function Offers({
 
                     <button
                       type="button"
-                      disabled={
-                        imageLoading || saving
-                      }
+                      disabled={imageLoading || saving}
                       onClick={() => {
                         void removeOfferImage()
                       }}
@@ -1478,7 +1497,6 @@ export default function Offers({
                       <X size={15} />
                       Remove Image
                     </button>
-
                   </div>
                 )}
 
@@ -1490,13 +1508,11 @@ export default function Offers({
                     {imageError}
                   </p>
                 )}
-
               </div>
 
               {/* DISCOUNT */}
 
               <div className="za-offer-form-grid">
-
                 <label>
                   Discount Type
 
@@ -1530,21 +1546,17 @@ export default function Offers({
                     required
                     min="0.01"
                     max={
-                      draft.discountType ===
-                      'percentage'
+                      draft.discountType === 'percentage'
                         ? 100
                         : undefined
                     }
                     step="0.01"
                     placeholder={
-                      draft.discountType ===
-                      'percentage'
+                      draft.discountType === 'percentage'
                         ? 'e.g. 15'
                         : 'e.g. 500'
                     }
-                    value={
-                      draft.discountValue
-                    }
+                    value={draft.discountValue}
                     disabled={saving}
                     onChange={event =>
                       updateDraft(
@@ -1554,7 +1566,6 @@ export default function Offers({
                     }
                   />
                 </label>
-
               </div>
 
               {/* PROMO CODE */}
@@ -1576,24 +1587,33 @@ export default function Offers({
                 />
               </label>
 
-              {/* DATES */}
+              {/* ======================================
+                  DATE SELECTION
+                  NO PAST DATES FOR NEW OFFERS
+              ====================================== */}
 
               <div className="za-offer-form-grid">
-
                 <label>
                   Start Date
 
                   <input
                     type="date"
+                    min={minimumStartDate}
                     value={draft.startDate}
                     disabled={saving}
                     onChange={event =>
-                      updateDraft(
-                        'startDate',
+                      updateStartDate(
                         event.target.value
                       )
                     }
                   />
+
+                  {hasHistoricalStartDate && (
+                    <small>
+                      Existing start date is in the past.
+                      Choose today or later to change it.
+                    </small>
+                  )}
                 </label>
 
                 <label>
@@ -1601,27 +1621,28 @@ export default function Offers({
 
                   <input
                     type="date"
-                    min={
-                      draft.startDate ||
-                      undefined
-                    }
+                    min={minimumEndDate}
                     value={draft.endDate}
                     disabled={saving}
                     onChange={event =>
-                      updateDraft(
-                        'endDate',
+                      updateEndDate(
                         event.target.value
                       )
                     }
                   />
-                </label>
 
+                  {hasHistoricalEndDate && (
+                    <small>
+                      Existing end date is in the past.
+                      Choose today or later to change it.
+                    </small>
+                  )}
+                </label>
               </div>
 
-              {/* ACTIVE SWITCH */}
+              {/* ENABLE PROMOTION */}
 
               <label className="za-edit-checkbox">
-
                 <input
                   type="checkbox"
                   checked={draft.active}
@@ -1651,7 +1672,6 @@ export default function Offers({
               {/* FORM ACTIONS */}
 
               <div className="za-edit-dialog-actions">
-
                 <button
                   type="button"
                   className="za-edit-cancel"
@@ -1667,9 +1687,7 @@ export default function Offers({
                 <button
                   type="submit"
                   className="za-primary"
-                  disabled={
-                    imageLoading || saving
-                  }
+                  disabled={imageLoading || saving}
                 >
                   <Check size={17} />
 
@@ -1679,15 +1697,11 @@ export default function Offers({
                       ? 'Save Changes'
                       : 'Create Offer'}
                 </button>
-
               </div>
-
             </form>
-
           </div>
         </div>
       )}
-
     </div>
   )
 }

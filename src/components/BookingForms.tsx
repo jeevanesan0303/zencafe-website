@@ -1,5 +1,7 @@
 
-import { FormEvent, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+
 import {
   AlertCircle,
   CheckCircle2,
@@ -26,6 +28,10 @@ type RoomForm = {
   occasion: string
   note: string
 }
+
+type Meridiem = 'AM' | 'PM'
+
+const ROOM_NAME = 'Private Dining Room'
 
 const emptyRoom: RoomForm = {
   name: '',
@@ -54,33 +60,69 @@ const MINUTES = Array.from(
   (_, index) => String(index).padStart(2, '0')
 )
 
-type Meridiem = 'AM' | 'PM'
+/* ==========================================
+   SRI LANKA LOCAL DATE
+========================================== */
 
-function localDateInputValue(date = new Date()) {
+function localDateInputValue(date = new Date()): string {
   try {
-    return new Intl.DateTimeFormat('en-CA', {
+    const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: 'Asia/Colombo',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(date)
+    }).formatToParts(date)
+
+    const getPart = (type: string) =>
+      parts.find(part => part.type === type)?.value ?? ''
+
+    const year = getPart('year')
+    const month = getPart('month')
+    const day = getPart('day')
+
+    if (year && month && day) {
+      return `${year}-${month}-${day}`
+    }
   } catch {
-    const y = date.getFullYear()
-    const m = String(date.getMonth() + 1).padStart(2, '0')
-    const d = String(date.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
+    // Use local date as a fallback.
   }
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
 }
 
-function phoneLooksValid(value: string) {
-  return value.replace(/\D/g, '').length >= 9
+/* ==========================================
+   PHONE NUMBER VALIDATION
+========================================== */
+
+// Remove letters, spaces, punctuation and other
+// non-numeric characters. Allow a maximum of 10 digits.
+function sanitizePhone(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 10)
 }
 
-function emailLooksValid(value: string) {
+// Zen Café booking phone numbers must contain
+// exactly 10 numeric digits.
+function phoneLooksValid(value: string): boolean {
+  return /^[0-9]{10}$/.test(value)
+}
+
+/* ==========================================
+   EMAIL VALIDATION
+========================================== */
+
+function emailLooksValid(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 }
 
-// Convert 12-hour time to 24-hour format for the booking API.
+/* ==========================================
+   TIME CONVERSION
+========================================== */
+
+// Convert 12-hour time to 24-hour format.
 // Example: 6:30 PM -> 18:30
 function to24HourTime(
   hour: string,
@@ -90,11 +132,15 @@ function to24HourTime(
   if (!hour || !minute) return ''
 
   const parsedHour = Number(hour)
+  const parsedMinute = Number(minute)
 
   if (
     !Number.isInteger(parsedHour) ||
     parsedHour < 1 ||
-    parsedHour > 12
+    parsedHour > 12 ||
+    !Number.isInteger(parsedMinute) ||
+    parsedMinute < 0 ||
+    parsedMinute > 59
   ) {
     return ''
   }
@@ -105,11 +151,13 @@ function to24HourTime(
     hour24 += 12
   }
 
-  return `${String(hour24).padStart(2, '0')}:${minute}`
+  return (
+    `${String(hour24).padStart(2, '0')}:` +
+    `${String(parsedMinute).padStart(2, '0')}`
+  )
 }
 
 // Convert API time to 12-hour display.
-// Example: 18:30 -> 6:30 PM
 function format12HourTime(time: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(time)
 
@@ -118,7 +166,9 @@ function format12HourTime(time: string): string {
   const hour24 = Number(match[1])
   const minute = match[2]
 
-  if (hour24 < 0 || hour24 > 23) return time
+  if (hour24 < 0 || hour24 > 23) {
+    return time
+  }
 
   const hour12 = hour24 % 12 || 12
   const meridiem = hour24 >= 12 ? 'PM' : 'AM'
@@ -146,18 +196,39 @@ function parse24HourTime(time: string) {
   return {
     hour: String(hour24 % 12 || 12),
     minute: String(minute).padStart(2, '0'),
-    meridiem: (hour24 >= 12 ? 'PM' : 'AM') as Meridiem,
+    meridiem: (
+      hour24 >= 12 ? 'PM' : 'AM'
+    ) as Meridiem,
   }
 }
 
-export function RoomBooking({ toast }: { toast: ToastFn }) {
-  const [form, setForm] = useState<RoomForm>(emptyRoom)
+/* ==========================================
+   ROOM BOOKING COMPONENT
+========================================== */
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
+export function RoomBooking({
+  toast,
+}: {
+  toast: ToastFn
+}) {
+  const [form, setForm] = useState<RoomForm>({
+    ...emptyRoom,
+  })
 
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-  const [serverMessage, setServerMessage] = useState('')
+  const [errors, setErrors] =
+    useState<Record<string, string>>({})
+
+  const [phoneTouched, setPhoneTouched] =
+    useState(false)
+
+  const [submitting, setSubmitting] =
+    useState(false)
+
+  const [submitted, setSubmitted] =
+    useState(false)
+
+  const [serverMessage, setServerMessage] =
+    useState('')
 
   const [availability, setAvailability] =
     useState<AvailabilityResponse | null>(null)
@@ -165,11 +236,47 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
   const [loadingAvailability, setLoadingAvailability] =
     useState(false)
 
-  // Separate values for the 12-hour time picker.
-  const [selectedHour, setSelectedHour] = useState('')
-  const [selectedMinute, setSelectedMinute] = useState('00')
+  const [availabilityError, setAvailabilityError] =
+    useState('')
+
+  const [selectedHour, setSelectedHour] =
+    useState('')
+
+  const [selectedMinute, setSelectedMinute] =
+    useState('00')
+
   const [selectedMeridiem, setSelectedMeridiem] =
     useState<Meridiem>('AM')
+
+  const [today, setToday] = useState(
+    () => localDateInputValue()
+  )
+
+  const phoneValid = phoneLooksValid(form.phone)
+
+  /* ==========================================
+     KEEP MINIMUM DATE CURRENT
+  ========================================== */
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const currentDate = localDateInputValue()
+
+      setToday(previous =>
+        previous === currentDate
+          ? previous
+          : currentDate
+      )
+    }, 60_000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  /* ==========================================
+     UPDATE FORM FIELDS
+  ========================================== */
 
   const update = <K extends keyof RoomForm>(
     key: K,
@@ -189,6 +296,34 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     }))
   }
 
+  /* ==========================================
+     PHONE INPUT HANDLER
+  ========================================== */
+
+  const handlePhoneChange = (
+    value: string
+  ) => {
+    const cleanedPhone = sanitizePhone(value)
+
+    setPhoneTouched(true)
+
+    update('phone', cleanedPhone)
+
+    if (
+      cleanedPhone.length > 0 &&
+      !phoneLooksValid(cleanedPhone)
+    ) {
+      setErrors(previous => ({
+        ...previous,
+        phone: 'Phone number must contain exactly 10 digits.',
+      }))
+    }
+  }
+
+  /* ==========================================
+     UPDATE BOOKING TIME
+  ========================================== */
+
   const updateTime = (
     hour: string,
     minute: string,
@@ -198,10 +333,15 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     setSelectedMinute(minute)
     setSelectedMeridiem(meridiem)
 
-    update('time', to24HourTime(hour, minute, meridiem))
+    update(
+      'time',
+      to24HourTime(hour, minute, meridiem)
+    )
   }
 
-  const selectAvailableSlot = (slot: string) => {
+  const selectAvailableSlot = (
+    slot: string
+  ) => {
     const parsed = parse24HourTime(slot)
 
     if (!parsed) return
@@ -213,11 +353,19 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     )
   }
 
-  // Fetch availability whenever the date changes.
+  /* ==========================================
+     FETCH LIVE ROOM AVAILABILITY
+  ========================================== */
+
   useEffect(() => {
-    if (!form.date || !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) {
+    if (
+      !form.date ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(form.date) ||
+      form.date < today
+    ) {
       setAvailability(null)
       setLoadingAvailability(false)
+      setAvailabilityError('')
       return
     }
 
@@ -225,17 +373,27 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
 
     setAvailability(null)
     setLoadingAvailability(true)
+    setAvailabilityError('')
 
-    fetchAvailability(form.date, 'Private Dining Room')
+    fetchAvailability(
+      form.date,
+      ROOM_NAME
+    )
       .then(response => {
-        if (active) {
-          setAvailability(response)
-        }
+        if (!active) return
+
+        setAvailability(response)
       })
-      .catch(() => {
-        if (active) {
-          setAvailability(null)
-        }
+      .catch(error => {
+        if (!active) return
+
+        setAvailability(null)
+
+        setAvailabilityError(
+          error instanceof Error
+            ? error.message
+            : 'Unable to check room availability.'
+        )
       })
       .finally(() => {
         if (active) {
@@ -246,49 +404,90 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     return () => {
       active = false
     }
-  }, [form.date])
+  }, [form.date, today])
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  /* ==========================================
+     SUBMIT BOOKING REQUEST
+  ========================================== */
+
+  const submit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault()
 
     if (submitting) return
 
     const nextErrors: Record<string, string> = {}
 
+    // Customer name
     if (!form.name.trim()) {
       nextErrors.name = 'Enter your name.'
     }
 
-    if (!phoneLooksValid(form.phone)) {
-      nextErrors.phone = 'Enter a valid phone number.'
+    // Phone validation
+    if (!form.phone) {
+      nextErrors.phone = 'Enter your phone number.'
+    } else if (!phoneLooksValid(form.phone)) {
+      nextErrors.phone =
+        'Phone number must contain exactly 10 digits.'
     }
 
+    // Email validation
     if (!form.email.trim()) {
-      nextErrors.email = 'Enter your email address.'
+      nextErrors.email =
+        'Enter your email address.'
     } else if (!emailLooksValid(form.email)) {
-      nextErrors.email = 'Enter a valid email address.'
+      nextErrors.email =
+        'Enter a valid email address.'
     }
 
+    // Date validation
     const minDate = localDateInputValue()
 
     if (!form.date) {
       nextErrors.date = 'Choose a date.'
-    } else if (form.date < minDate) {
-      nextErrors.date = 'Choose today or a future date.'
+    } else if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(form.date) ||
+      form.date < minDate
+    ) {
+      nextErrors.date =
+        'Choose today or a future date.'
     }
 
+    // Time validation
     if (!form.time) {
       nextErrors.time = 'Choose a time.'
     }
 
-    if (form.guests < 1 || form.guests > 20) {
-      nextErrors.guests = 'Choose between 1 and 20 guests.'
+    // Guests validation
+    if (
+      !Number.isInteger(form.guests) ||
+      form.guests < 1 ||
+      form.guests > 20
+    ) {
+      nextErrors.guests =
+        'Choose between 1 and 20 guests.'
+    }
+
+    // Duration validation
+    if (
+      !Number.isInteger(form.duration) ||
+      form.duration < 1 ||
+      form.duration > 3
+    ) {
+      nextErrors.duration =
+        'Choose a duration between 1 and 3 hours.'
     }
 
     setErrors(nextErrors)
 
     if (Object.keys(nextErrors).length > 0) {
-      toast('Please complete the required booking fields.')
+      setPhoneTouched(true)
+
+      toast(
+        'Please complete the required booking fields.'
+      )
+
       return
     }
 
@@ -299,24 +498,24 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     try {
       await submitCustomerBooking({
         customerName: form.name.trim(),
-        phone: form.phone.trim(),
+        phone: form.phone,
         email: form.email.trim(),
         date: form.date,
-
-        // Send 24-hour time to the existing backend.
         time: form.time,
-
         duration: form.duration,
         guests: form.guests,
         occasion: form.occasion,
         notes: form.note.trim() || undefined,
-        roomName: 'Private Dining Room',
+        roomName: ROOM_NAME,
       })
 
       setSubmitted(true)
       setServerMessage('')
+      setErrors({})
 
-      toast('Your booking request was submitted successfully!')
+      toast(
+        'Your booking request was submitted successfully!'
+      )
 
       setForm(previous => ({
         ...emptyRoom,
@@ -329,6 +528,7 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
       setSelectedMinute('00')
       setSelectedMeridiem('AM')
       setAvailability(null)
+      setPhoneTouched(false)
     } catch (error) {
       const message =
         error instanceof Error
@@ -343,12 +543,19 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
     }
   }
 
+  /* ==========================================
+     BOOKING FORM UI
+  ========================================== */
+
   return (
     <div className="room-booking-layout room-booking-layout-v121">
       <form
         onSubmit={submit}
+        noValidate
         className="room-booking-form room-booking-form-v121 zen-booking-select-fix panel p-6 sm:p-8"
       >
+        {/* FORM HEADING */}
+
         <div className="room-form-head mb-6 flex items-start justify-between gap-4">
           <div>
             <h3 className="font-serif text-[31px] leading-none sm:text-[36px]">
@@ -356,8 +563,9 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             </h3>
 
             <p className="mt-1 text-[11px] text-[#76665d]">
-              Requests are reviewed by our team. Accepted bookings
-              reserve the room exclusively.
+              Requests are reviewed by our team.
+              Accepted bookings reserve the room
+              exclusively.
             </p>
           </div>
 
@@ -366,11 +574,16 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
           </span>
         </div>
 
+        {/* BOOKING FIELDS */}
+
         <div className="room-fields-grid grid gap-4 sm:grid-cols-2">
+          {/* NAME */}
+
           <label className="field-label">
             Name *
 
             <input
+              type="text"
               value={form.name}
               onChange={event =>
                 update('name', event.target.value)
@@ -380,6 +593,7 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
               }`}
               placeholder="Your name"
               autoComplete="name"
+              required
             />
 
             {errors.name && (
@@ -389,28 +603,72 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             )}
           </label>
 
+          {/* PHONE NUMBER */}
+
           <label className="field-label">
             Phone *
 
             <input
               type="tel"
+              inputMode="numeric"
+              pattern="[0-9]{10}"
+              maxLength={10}
+              minLength={10}
               value={form.phone}
               onChange={event =>
-                update('phone', event.target.value)
+                handlePhoneChange(event.target.value)
               }
+              onBlur={() => setPhoneTouched(true)}
+              onPaste={event => {
+                event.preventDefault()
+
+                const pastedText =
+                  event.clipboardData.getData('text')
+
+                handlePhoneChange(pastedText)
+              }}
               className={`field-input ${
-                errors.phone ? 'field-error' : ''
+                errors.phone ||
+                (phoneTouched &&
+                  form.phone.length > 0 &&
+                  !phoneValid)
+                  ? 'field-error'
+                  : ''
               }`}
-              placeholder="077 000 0000"
-              autoComplete="tel"
+              placeholder="0771234567"
+              autoComplete="tel-national"
+              aria-invalid={
+                Boolean(errors.phone) ||
+                (phoneTouched &&
+                  form.phone.length > 0 &&
+                  !phoneValid)
+              }
+              required
             />
 
-            {errors.phone && (
+            {errors.phone ? (
               <span className="error-copy">
                 {errors.phone}
               </span>
+            ) : phoneTouched &&
+              form.phone.length > 0 &&
+              !phoneValid ? (
+              <span className="error-copy">
+                Enter exactly 10 digits.
+              </span>
+            ) : phoneValid ? (
+              <span className="mt-1 flex items-center gap-1 text-[11px] text-[#2f7d55]">
+                <CheckCircle2 size={13} />
+                Valid 10-digit phone number
+              </span>
+            ) : (
+              <span className="mt-1 text-[10px] text-[#76665d]">
+                Enter a 10-digit phone number.
+              </span>
             )}
           </label>
+
+          {/* EMAIL */}
 
           <label className="field-label sm:col-span-2">
             Email (for booking confirmation) *
@@ -426,6 +684,7 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
               }`}
               placeholder="name@example.com"
               autoComplete="email"
+              required
             />
 
             {errors.email && (
@@ -435,19 +694,22 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             )}
           </label>
 
+          {/* DATE */}
+
           <label className="field-label">
             Date *
 
             <input
+              type="date"
               value={form.date}
               onChange={event =>
                 update('date', event.target.value)
               }
-              type="date"
-              min={localDateInputValue()}
+              min={today}
               className={`field-input ${
                 errors.date ? 'field-error' : ''
               }`}
+              required
             />
 
             {errors.date && (
@@ -458,6 +720,7 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
           </label>
 
           {/* 12-HOUR TIME PICKER */}
+
           <div className="field-label">
             <span>Time *</span>
 
@@ -475,11 +738,15 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
                 className={`field-input min-w-0 ${
                   errors.time ? 'field-error' : ''
                 }`}
+                required
               >
                 <option value="">Hour</option>
 
                 {HOURS_12.map(hour => (
-                  <option key={hour} value={hour}>
+                  <option
+                    key={hour}
+                    value={hour}
+                  >
                     {String(hour).padStart(2, '0')}
                   </option>
                 ))}
@@ -500,7 +767,10 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
                 }`}
               >
                 {MINUTES.map(minute => (
-                  <option key={minute} value={minute}>
+                  <option
+                    key={minute}
+                    value={minute}
+                  >
                     {minute}
                   </option>
                 ))}
@@ -532,13 +802,28 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             )}
           </div>
 
-          {/* LIVE AVAILABILITY */}
+          {/* LIVE AVAILABILITY LOADING */}
+
           {loadingAvailability && (
             <div className="sm:col-span-2 flex items-center gap-2 text-[11px] text-[#76665d]">
               <Clock size={14} />
               Checking available time slots...
             </div>
           )}
+
+          {/* AVAILABILITY ERROR */}
+
+          {availabilityError && (
+            <div className="sm:col-span-2 flex items-center gap-2 rounded-[14px] border border-[#a32722]/15 bg-[#fff5f2] p-3 text-[11px] text-[#a32722]">
+              <AlertCircle size={15} />
+
+              <span>
+                {availabilityError}
+              </span>
+            </div>
+          )}
+
+          {/* LIVE AVAILABLE SLOTS */}
 
           {availability && (
             <div className="sm:col-span-2 rounded-[18px] border border-[#a32722]/10 bg-[#fffaf5] p-3 text-[11px] text-[#695950]">
@@ -571,28 +856,37 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
                 </div>
               ) : (
                 <p className="mt-1 text-[10px] text-[#a32722]">
-                  No slots currently available for this date.
+                  No slots currently available for
+                  this date.
                 </p>
               )}
             </div>
           )}
 
-          {/* GUESTS: 1 TO 20 */}
+          {/* GUESTS */}
+
           <label className="field-label">
             Guests
 
             <select
               value={form.guests}
               onChange={event =>
-                update('guests', Number(event.target.value))
+                update(
+                  'guests',
+                  Number(event.target.value)
+                )
               }
               className={`field-input ${
                 errors.guests ? 'field-error' : ''
               }`}
             >
               {ROOM_GUEST_OPTIONS.map(value => (
-                <option key={value} value={value}>
-                  {value} {value === 1 ? 'guest' : 'guests'}
+                <option
+                  key={value}
+                  value={value}
+                >
+                  {value}{' '}
+                  {value === 1 ? 'guest' : 'guests'}
                 </option>
               ))}
             </select>
@@ -604,21 +898,38 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             )}
           </label>
 
+          {/* DURATION */}
+
           <label className="field-label">
             Duration
 
             <select
               value={form.duration}
               onChange={event =>
-                update('duration', Number(event.target.value))
+                update(
+                  'duration',
+                  Number(event.target.value)
+                )
               }
-              className="field-input"
+              className={`field-input ${
+                errors.duration ? 'field-error' : ''
+              }`}
             >
               <option value={1}>1 hour</option>
               <option value={2}>2 hours</option>
-              <option value={3}>3 hours — maximum</option>
+              <option value={3}>
+                3 hours — maximum
+              </option>
             </select>
+
+            {errors.duration && (
+              <span className="error-copy">
+                {errors.duration}
+              </span>
+            )}
           </label>
+
+          {/* OCCASION */}
 
           <label className="field-label room-occasion-v121 sm:col-span-2">
             Occasion
@@ -626,7 +937,10 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             <select
               value={form.occasion}
               onChange={event =>
-                update('occasion', event.target.value)
+                update(
+                  'occasion',
+                  event.target.value
+                )
               }
               className="field-input"
             >
@@ -639,18 +953,25 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
           </label>
         </div>
 
+        {/* SPECIAL NOTE */}
+
         <label className="room-note-field field-label mt-4">
           Special note
 
           <textarea
             value={form.note}
             onChange={event =>
-              update('note', event.target.value)
+              update(
+                'note',
+                event.target.value
+              )
             }
             className="field-input min-h-[110px] resize-y"
             placeholder="Decoration, seating or food preferences…"
           />
         </label>
+
+        {/* SERVER ERROR */}
 
         {serverMessage && !submitted && (
           <div className="mt-4 flex items-center gap-2 rounded-[16px] border border-[#a32722]/20 bg-[#fdf2f2] p-3 text-[11px] text-[#a32722]">
@@ -663,6 +984,8 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
           </div>
         )}
 
+        {/* SUBMIT BUTTON */}
+
         <button
           type="submit"
           disabled={submitting}
@@ -674,6 +997,8 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
             ? 'Submitting request…'
             : 'Submit room request'}
         </button>
+
+        {/* SUCCESS MESSAGE */}
 
         {submitted && (
           <div
@@ -694,18 +1019,19 @@ export function RoomBooking({ toast }: { toast: ToastFn }) {
 
                 <p className="text-[12px] leading-relaxed">
                   Thank you for choosing Zen Café!
-                  Your room booking request has been
-                  received successfully.
+                  Your room booking request has
+                  been received successfully.
                 </p>
 
                 <p className="text-[12px] leading-relaxed">
-                  Please wait for confirmation from our
-                  team and check your email for your
-                  booking confirmation.
+                  Please wait for confirmation from
+                  our team and check your email for
+                  your booking confirmation.
                 </p>
 
                 <p className="text-[11px] font-semibold text-[#48705a]">
-                  Your booking is currently awaiting review.
+                  Your booking is currently awaiting
+                  review.
                 </p>
               </div>
             </div>
