@@ -112,7 +112,7 @@ export default function App(){
         <div className="room-essentials-v121" aria-label="Private room essentials">
           <div className="room-essential-v121"><Users size={19}/><span><small>Room limit</small><b>10–15 guests</b></span></div>
           <div className="room-essential-v121"><Clock3 size={19}/><span><small>Maximum stay</small><b>3 hours</b></span></div>
-          <div className="room-essential-v121"><ClipboardCheck size={19}/><span><small>Confirmation</small><b>WhatsApp</b></span></div>
+          <div className="room-essential-v121"><ClipboardCheck size={19}/><span><small>Confirmation</small><b>Email</b></span></div>
         </div>
 
         <RoomBooking toast={toastNow}/>
