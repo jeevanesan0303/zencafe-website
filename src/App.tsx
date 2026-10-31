@@ -105,7 +105,7 @@ export default function App(){
    <MenuCarousel/>
    <section id="room-booking" data-zen-reveal className="zen-room-section section-shell zen-reveal relative overflow-hidden bg-[#eee1d4]"><div className="room-section-inner mx-auto max-w-[1500px] px-5 py-24 sm:px-10 lg:px-12">
         <div className="room-section-head room-section-head-v121">
-          <div><h2 className="section-title room-booking-title">Private room booking.<br/><span>Fill once. Submit clearly.</span></h2></div>
+          <div><h2 className="section-title room-booking-title">Party room booking.<br/><span>Fill once. Submit clearly.</span></h2></div>
           <p className="section-copy">Choose your details below.</p>
         </div>
 

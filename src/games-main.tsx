@@ -1,6 +1,7 @@
 
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
+
 import {
   useEffect,
   useRef,
@@ -31,24 +32,26 @@ import {
   readGameConfig,
   fetchGameConfig,
   subscribeGameConfig,
+  DEFAULT_SCRATCH_COUNT,
+  MIN_SCRATCH_COUNT,
+  MAX_SCRATCH_COUNT,
   type GameConfig,
   type GamePrize,
 } from './data/gameStore'
 
 import './games.css'
 
-/* ======================================================
-   SETTINGS
-====================================================== */
+/* ==========================================
+   ZEN CAFÉ — SCRATCH & WIN
+========================================== */
 
 const SCRATCH_WIDTH = 480
 const SCRATCH_HEIGHT = 280
 const BRUSH_SIZE = 46
-const KEYBOARD_STRIP_HEIGHT = 20
 
-/* ======================================================
-   CARD CONTENT
-====================================================== */
+// Minimum travel distance for a valid swipe.
+// A simple tap does not count as a scratch.
+const MIN_GESTURE_DISTANCE = 18
 
 const cards = [
   {
@@ -147,9 +150,9 @@ const confettiColors = [
   '#ffffff',
 ]
 
-/* ======================================================
+/* ==========================================
    TYPES
-====================================================== */
+========================================== */
 
 type Point = {
   x: number
@@ -178,20 +181,36 @@ type ScratchCardProps = {
   result: GameResult
   enabled: boolean
   revealed: boolean
+  requiredScratches: number
   onReveal: () => void
 }
 
-/* ======================================================
-   CARD-SPECIFIC RESULT
+/* ==========================================
+   GAME CONFIGURATION HELPERS
+========================================== */
 
-   Card 1 -> config.cards cardId 1
-   Card 2 -> config.cards cardId 2
-   Card 3 -> config.cards cardId 3
-   Card 4 -> config.cards cardId 4
-   Card 5 -> config.cards cardId 5
+function getRequiredScratches(
+  config: GameConfig
+): number {
+  const count = config.scratchCount
 
-   No random reward assignment.
-====================================================== */
+  if (
+    !Number.isInteger(count) ||
+    count < MIN_SCRATCH_COUNT ||
+    count > MAX_SCRATCH_COUNT
+  ) {
+    return DEFAULT_SCRATCH_COUNT
+  }
+
+  return count
+}
+
+/* ==========================================
+   CARD RESULT
+
+   Preserves existing admin-defined
+   winning card positions.
+========================================== */
 
 function createResult(
   cardIndex: number,
@@ -203,10 +222,11 @@ function createResult(
     card => card.cardId === cardId
   )
 
-  if (!config.enabled || !selectedCard?.prize) {
-    return {
-      kind: 'lose',
-    }
+  if (
+    !config.enabled ||
+    !selectedCard?.prize
+  ) {
+    return { kind: 'lose' }
   }
 
   return {
@@ -215,13 +235,16 @@ function createResult(
   }
 }
 
-/* ======================================================
-   BACKGROUND
-====================================================== */
+/* ==========================================
+   GAMING BACKGROUND
+========================================== */
 
 function GamingBackground() {
   return (
-    <div className="zg-background" aria-hidden="true">
+    <div
+      className="zg-background"
+      aria-hidden="true"
+    >
       <div className="zg-grid" />
       <div className="zg-orb zg-orb-purple" />
       <div className="zg-orb zg-orb-blue" />
@@ -232,7 +255,10 @@ function GamingBackground() {
 
         <div className="zg-scene-posters">
           {cards.slice(0, 3).map((card, index) => (
-            <div className="zg-scene-poster" key={index}>
+            <div
+              className="zg-scene-poster"
+              key={index}
+            >
               <img
                 src={card.image}
                 alt=""
@@ -250,7 +276,6 @@ function GamingBackground() {
               draggable={false}
             />
           </div>
-
           <span className="zg-monitor-neck" />
           <span className="zg-monitor-base" />
         </div>
@@ -274,19 +299,28 @@ function GamingBackground() {
       </div>
 
       <div className="zg-neon-trails">
-        {Array.from({ length: 6 }, (_, index) => (
-          <span
-            key={index}
-            className={`zg-neon-trail trail-${index % 3}`}
-            style={{
-              top: `${17 + index * 15}%`,
-              animationDelay: `${-index * 3.1}s`,
-              animationDuration: `${15 + index * 1.4}s`,
-              animationDirection:
-                index % 2 ? 'reverse' : 'normal',
-            }}
-          />
-        ))}
+        {Array.from(
+          { length: 6 },
+          (_, index) => (
+            <span
+              key={index}
+              className={
+                `zg-neon-trail trail-${index % 3}`
+              }
+              style={{
+                top: `${17 + index * 15}%`,
+                animationDelay:
+                  `${-index * 3.1}s`,
+                animationDuration:
+                  `${15 + index * 1.4}s`,
+                animationDirection:
+                  index % 2
+                    ? 'reverse'
+                    : 'normal',
+              }}
+            />
+          )
+        )}
       </div>
 
       <div className="zg-floating-items">
@@ -297,8 +331,10 @@ function GamingBackground() {
               left: `${item.x}%`,
               top: `${item.y}%`,
               fontSize: `${item.size}px`,
-              animationDelay: `${item.delay}s`,
-              animationDuration: `${11 + index}s`,
+              animationDelay:
+                `${item.delay}s`,
+              animationDuration:
+                `${11 + index}s`,
             }}
           >
             {item.emoji}
@@ -307,92 +343,148 @@ function GamingBackground() {
       </div>
 
       <div className="zg-sparks">
-        {Array.from({ length: 16 }, (_, index) => (
-          <i
-            key={index}
-            style={{
-              left: `${(index * 31 + 7) % 100}%`,
-              top: `${(index * 23 + 9) % 100}%`,
-              animationDelay: `${-(index % 7)}s`,
-              animationDuration: `${4 + (index % 4)}s`,
-            }}
-          />
-        ))}
+        {Array.from(
+          { length: 16 },
+          (_, index) => (
+            <i
+              key={index}
+              style={{
+                left:
+                  `${(index * 31 + 7) % 100}%`,
+                top:
+                  `${(index * 23 + 9) % 100}%`,
+                animationDelay:
+                  `${-(index % 7)}s`,
+                animationDuration:
+                  `${4 + (index % 4)}s`,
+              }}
+            />
+          )
+        )}
       </div>
     </div>
   )
 }
 
-/* ======================================================
+/* ==========================================
    WIN CELEBRATION
-====================================================== */
+========================================== */
 
 function WinCelebration() {
   return (
-    <div className="zg-celebration" aria-hidden="true">
+    <div
+      className="zg-celebration"
+      aria-hidden="true"
+    >
       <div className="zg-celebration-glow" />
 
-      {Array.from({ length: 64 }, (_, index) => {
-        const style = {
-          left: `${(index * 37 + 11) % 100}%`,
-          width: `${6 + (index % 5)}px`,
-          height: `${9 + (index % 7)}px`,
-          backgroundColor:
-            confettiColors[index % confettiColors.length],
-          borderRadius:
-            index % 3 === 0 ? '50%' : '2px',
-          animationDelay:
-            `${(index % 12) * 0.055}s`,
-          animationDuration:
-            `${2.6 + (index % 6) * 0.22}s`,
-          '--drift':
-            `${((index * 29) % 220) - 110}px`,
-          '--spin':
-            `${index % 2 === 0 ? 720 : -720}deg`,
-        } as CSSProperties
+      {Array.from(
+        { length: 64 },
+        (_, index) => {
+          const style = {
+            left:
+              `${(index * 37 + 11) % 100}%`,
+            width:
+              `${6 + (index % 5)}px`,
+            height:
+              `${9 + (index % 7)}px`,
+            backgroundColor:
+              confettiColors[
+                index % confettiColors.length
+              ],
+            borderRadius:
+              index % 3 === 0
+                ? '50%'
+                : '2px',
+            animationDelay:
+              `${(index % 12) * 0.055}s`,
+            animationDuration:
+              `${2.6 + (index % 6) * 0.22}s`,
+            '--drift':
+              `${((index * 29) % 220) - 110}px`,
+            '--spin':
+              `${
+                index % 2 === 0
+                  ? 720
+                  : -720
+              }deg`,
+          } as CSSProperties
 
-        return (
-          <span
-            key={index}
-            className="zg-confetti"
-            style={style}
-          />
-        )
-      })}
+          return (
+            <span
+              key={index}
+              className="zg-confetti"
+              style={style}
+            />
+          )
+        }
+      )}
     </div>
   )
 }
 
-/* ======================================================
-   SCRATCH CARD COMPONENT
-====================================================== */
+/* ==========================================
+   SCRATCH CARD
+
+   Counts completed scratch gestures.
+   Does not require 100% pixel clearance.
+========================================== */
 
 function ScratchCard({
   result,
   enabled,
   revealed,
+  requiredScratches,
   onReveal,
 }: ScratchCardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const activePointerRef = useRef<number | null>(null)
-  const previousRef = useRef<Point | null>(null)
-  const lastCheckRef = useRef(0)
+  const canvasRef =
+    useRef<HTMLCanvasElement>(null)
+
+  const activePointerRef =
+    useRef<number | null>(null)
+
+  const previousPointRef =
+    useRef<Point | null>(null)
+
+  const gestureDistanceRef = useRef(0)
+
+  const scratchCountRef = useRef(0)
   const completedRef = useRef(false)
 
-  const [progress, setProgress] = useState(0)
-  const [canvasUnavailable, setCanvasUnavailable] =
-    useState(false)
+  const [scratchCount, setScratchCount] =
+    useState(0)
 
-  /* ====================================================
-     DRAW SCRATCH COATING
-  ==================================================== */
+  const [
+    canvasUnavailable,
+    setCanvasUnavailable,
+  ] = useState(false)
+
+  const target = Math.max(
+    MIN_SCRATCH_COUNT,
+    Math.min(
+      MAX_SCRATCH_COUNT,
+      Math.round(requiredScratches)
+    )
+  )
+
+  const progress = Math.min(
+    100,
+    (scratchCount / target) * 100
+  )
+
+  const remaining = Math.max(
+    0,
+    target - scratchCount
+  )
+
+  /* ========================================
+     DRAW ORIGINAL SCRATCH COATING
+  ======================================== */
 
   useEffect(() => {
     const canvas = canvasRef.current
 
-    const context = canvas?.getContext('2d', {
-      willReadFrequently: true,
-    })
+    const context = canvas?.getContext('2d')
 
     if (!canvas || !context) {
       setCanvasUnavailable(true)
@@ -400,14 +492,17 @@ function ScratchCard({
     }
 
     setCanvasUnavailable(false)
-    setProgress(0)
+    setScratchCount(0)
 
+    scratchCountRef.current = 0
     completedRef.current = false
     activePointerRef.current = null
-    previousRef.current = null
-    lastCheckRef.current = 0
+    previousPointRef.current = null
+    gestureDistanceRef.current = 0
 
-    context.globalCompositeOperation = 'source-over'
+    context.globalCompositeOperation =
+      'source-over'
+
     context.clearRect(
       0,
       0,
@@ -415,12 +510,13 @@ function ScratchCard({
       canvas.height
     )
 
-    const gradient = context.createLinearGradient(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    )
+    const gradient =
+      context.createLinearGradient(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
 
     gradient.addColorStop(0, '#7745bd')
     gradient.addColorStop(0.3, '#b985f0')
@@ -436,11 +532,28 @@ function ScratchCard({
       canvas.height
     )
 
-    for (let y = 12; y < canvas.height; y += 22) {
-      for (let x = 12; x < canvas.width; x += 22) {
+    for (
+      let y = 12;
+      y < canvas.height;
+      y += 22
+    ) {
+      for (
+        let x = 12;
+        x < canvas.width;
+        x += 22
+      ) {
         context.beginPath()
-        context.arc(x, y, 1.2, 0, Math.PI * 2)
-        context.fillStyle = 'rgba(50, 20, 90, 0.14)'
+        context.arc(
+          x,
+          y,
+          1.2,
+          0,
+          Math.PI * 2
+        )
+
+        context.fillStyle =
+          'rgba(50, 20, 90, 0.14)'
+
         context.fill()
       }
     }
@@ -461,6 +574,7 @@ function ScratchCard({
     context.fillStyle = '#35204f'
 
     context.font = '600 14px system-ui'
+
     context.fillText(
       'ZEN LUCKY TABLE',
       canvas.width / 2,
@@ -468,6 +582,7 @@ function ScratchCard({
     )
 
     context.font = '34px Georgia'
+
     context.fillText(
       'Unlock your luck',
       canvas.width / 2,
@@ -475,13 +590,15 @@ function ScratchCard({
     )
 
     context.font = '16px system-ui'
+
     context.fillText(
-      'Scratch the entire surface',
+      `Complete ${target} scratches`,
       canvas.width / 2,
       168
     )
 
     context.font = '14px system-ui'
+
     context.fillText(
       'Your surprise stays hidden until the end',
       canvas.width / 2,
@@ -489,18 +606,58 @@ function ScratchCard({
     )
 
     context.font = '22px Georgia'
+
     context.fillText(
       '✦',
       canvas.width / 2,
       237
     )
-  }, [])
+  }, [target])
 
-  /* ====================================================
-     CHECK SCRATCH PROGRESS
-  ==================================================== */
+  /* ========================================
+     REVEAL AFTER REQUIRED SCRATCHES
+  ======================================== */
 
-  const checkCompletion = () => {
+  const completeScratchGame = () => {
+    if (
+      completedRef.current ||
+      !enabled ||
+      revealed
+    ) {
+      return
+    }
+
+    completedRef.current = true
+
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+
+    if (canvas && context) {
+      context.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      )
+    }
+
+    scratchCountRef.current = target
+    setScratchCount(target)
+
+    activePointerRef.current = null
+    previousPointRef.current = null
+    gestureDistanceRef.current = 0
+
+    onReveal()
+  }
+
+  /* ========================================
+     REGISTER ONE VALID SCRATCH
+
+     A completed drag counts once.
+  ======================================== */
+
+  const registerScratch = () => {
     if (
       !enabled ||
       revealed ||
@@ -509,55 +666,70 @@ function ScratchCard({
       return
     }
 
-    const canvas = canvasRef.current
-
-    const context = canvas?.getContext('2d', {
-      willReadFrequently: true,
-    })
-
-    if (!canvas || !context) return
-
-    const pixels = context.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    ).data
-
-    let cleared = 0
-    const total = canvas.width * canvas.height
-
-    for (
-      let index = 3;
-      index < pixels.length;
-      index += 4
-    ) {
-      if (pixels[index] === 0) {
-        cleared += 1
-      }
-    }
-
-    const complete = cleared === total
-
-    setProgress(
-      complete
-        ? 100
-        : Math.min(
-            99,
-            Math.floor((cleared / total) * 100)
-          )
+    const next = Math.min(
+      target,
+      scratchCountRef.current + 1
     )
 
-    if (complete) {
-      completedRef.current = true
-      previousRef.current = null
-      onReveal()
+    scratchCountRef.current = next
+    setScratchCount(next)
+
+    if (next >= target) {
+      completeScratchGame()
     }
   }
 
-  /* ====================================================
-     SCRATCH WITH POINTER
-  ==================================================== */
+  /* ========================================
+     CANVAS POINTER COORDINATES
+  ======================================== */
+
+  const getPointerPoint = (
+    event: ReactPointerEvent<HTMLCanvasElement>
+  ): Point | null => {
+    const canvas = canvasRef.current
+
+    if (!canvas) return null
+
+    const rect =
+      canvas.getBoundingClientRect()
+
+    if (
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
+      return null
+    }
+
+    return {
+      x: Math.max(
+        0,
+        Math.min(
+          canvas.width,
+          (
+            (event.clientX - rect.left) /
+            rect.width
+          ) * canvas.width
+        )
+      ),
+      y: Math.max(
+        0,
+        Math.min(
+          canvas.height,
+          (
+            (event.clientY - rect.top) /
+            rect.height
+          ) * canvas.height
+        )
+      ),
+    }
+  }
+
+  /* ========================================
+     SCRATCH SURFACE
+
+     The coating is decorative.
+     The reveal condition is scratch count.
+  ======================================== */
 
   const scratch = (
     event: ReactPointerEvent<HTMLCanvasElement>
@@ -571,49 +743,33 @@ function ScratchCard({
     }
 
     const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    const point = getPointerPoint(event)
 
-    const context = canvas?.getContext('2d', {
-      willReadFrequently: true,
-    })
-
-    if (!canvas || !context) return
-
-    const rect = canvas.getBoundingClientRect()
-
-    if (!rect.width || !rect.height) return
-
-    const point: Point = {
-      x: Math.max(
-        0,
-        Math.min(
-          canvas.width,
-          ((event.clientX - rect.left) / rect.width) *
-            canvas.width
-        )
-      ),
-      y: Math.max(
-        0,
-        Math.min(
-          canvas.height,
-          ((event.clientY - rect.top) / rect.height) *
-            canvas.height
-        )
-      ),
+    if (!canvas || !context || !point) {
+      return
     }
 
-    const previous = previousRef.current ?? point
+    const previous =
+      previousPointRef.current ?? point
 
     const distance = Math.hypot(
       point.x - previous.x,
       point.y - previous.y
     )
 
+    gestureDistanceRef.current += distance
+
     const steps = Math.max(
       1,
       Math.ceil(distance / 5)
     )
 
-    for (let step = 0; step <= steps; step += 1) {
+    for (
+      let step = 0;
+      step <= steps;
+      step += 1
+    ) {
       const amount = step / steps
 
       const x =
@@ -632,19 +788,12 @@ function ScratchCard({
       )
     }
 
-    previousRef.current = point
-
-    const now = performance.now()
-
-    if (now - lastCheckRef.current >= 100) {
-      lastCheckRef.current = now
-      checkCompletion()
-    }
+    previousPointRef.current = point
   }
 
-  /* ====================================================
+  /* ========================================
      POINTER START
-  ==================================================== */
+  ======================================== */
 
   const startScratching = (
     event: ReactPointerEvent<HTMLCanvasElement>
@@ -653,6 +802,7 @@ function ScratchCard({
       !enabled ||
       revealed ||
       completedRef.current ||
+      canvasUnavailable ||
       !event.isPrimary ||
       event.button !== 0 ||
       activePointerRef.current !== null
@@ -662,25 +812,42 @@ function ScratchCard({
 
     event.preventDefault()
 
-    activePointerRef.current = event.pointerId
-    previousRef.current = null
+    const point = getPointerPoint(event)
 
-    event.currentTarget.setPointerCapture(
+    if (!point) return
+
+    activePointerRef.current =
       event.pointerId
-    )
+
+    previousPointRef.current = point
+    gestureDistanceRef.current = 0
+
+    try {
+      event.currentTarget.setPointerCapture(
+        event.pointerId
+      )
+    } catch {
+      activePointerRef.current = null
+      previousPointRef.current = null
+      return
+    }
 
     scratch(event)
   }
 
-  /* ====================================================
+  /* ========================================
      POINTER END
-  ==================================================== */
+
+     Count only a completed, meaningful
+     scratch gesture.
+  ======================================== */
 
   const stopScratching = (
     event: ReactPointerEvent<HTMLCanvasElement>
   ) => {
     if (
-      activePointerRef.current !== event.pointerId
+      activePointerRef.current !==
+      event.pointerId
     ) {
       return
     }
@@ -689,8 +856,14 @@ function ScratchCard({
       scratch(event)
     }
 
+    const validGesture =
+      event.type === 'pointerup' &&
+      gestureDistanceRef.current >=
+        MIN_GESTURE_DISTANCE
+
     activePointerRef.current = null
-    previousRef.current = null
+    previousPointRef.current = null
+    gestureDistanceRef.current = 0
 
     if (
       event.currentTarget.hasPointerCapture(
@@ -702,72 +875,53 @@ function ScratchCard({
       )
     }
 
-    checkCompletion()
+    if (validGesture) {
+      registerScratch()
+    }
   }
 
-  /* ====================================================
-     KEYBOARD ACCESSIBLE SCRATCHING
-  ==================================================== */
+  /* ========================================
+     KEYBOARD ACCESSIBLE SCRATCH
+
+     One button press = one scratch.
+  ======================================== */
 
   const scratchNextStrip = () => {
     if (
       !enabled ||
       revealed ||
       completedRef.current ||
+      canvasUnavailable ||
       activePointerRef.current !== null
     ) {
       return
     }
 
     const canvas = canvasRef.current
-
-    const context = canvas?.getContext('2d', {
-      willReadFrequently: true,
-    })
+    const context = canvas?.getContext('2d')
 
     if (!canvas || !context) return
 
-    const pixels = context.getImageData(
+    const index = scratchCountRef.current
+
+    const y =
+      (index * 23) % canvas.height
+
+    context.clearRect(
       0,
-      0,
+      y,
       canvas.width,
-      canvas.height
-    ).data
+      20
+    )
 
-    for (let y = 0; y < canvas.height; y += 1) {
-      let hasCoating = false
-
-      for (let x = 0; x < canvas.width; x += 1) {
-        if (
-          pixels[
-            (y * canvas.width + x) * 4 + 3
-          ] !== 0
-        ) {
-          hasCoating = true
-          break
-        }
-      }
-
-      if (hasCoating) {
-        context.clearRect(
-          0,
-          y,
-          canvas.width,
-          KEYBOARD_STRIP_HEIGHT
-        )
-        break
-      }
-    }
-
-    previousRef.current = null
-    checkCompletion()
+    registerScratch()
   }
 
   const won = result.kind === 'win'
 
-  /* ====================================================
+  /* ========================================
      SCRATCH CARD UI
-  ==================================================== */
+  ======================================== */
 
   return (
     <div className="zg-scratch-area">
@@ -823,9 +977,12 @@ function ScratchCard({
             aria-hidden="true"
           >
             <Sparkles size={28} />
+
             <strong>Keep scratching</strong>
+
             <span>
-              Clear the entire surface to unlock your result
+              Complete {target} scratches to
+              unlock your result
             </span>
           </div>
         )}
@@ -836,6 +993,13 @@ function ScratchCard({
           height={SCRATCH_HEIGHT}
           className="zg-scratch-canvas"
           aria-hidden="true"
+          style={{
+            touchAction: 'none',
+            pointerEvents:
+              enabled && !revealed
+                ? 'auto'
+                : 'none',
+          }}
           onPointerDown={startScratching}
           onPointerMove={event => {
             if (
@@ -855,15 +1019,19 @@ function ScratchCard({
         />
       </div>
 
+      {/* SCRATCH COUNTER */}
+
       <div className="zg-scratch-progress">
         <div className="zg-progress-label">
           <span>
             {revealed
-              ? 'Unlocked'
-              : 'Surface cleared'}
+              ? 'Reward unlocked'
+              : 'Scratch progress'}
           </span>
 
-          <strong>{progress}%</strong>
+          <strong>
+            {scratchCount} / {target}
+          </strong>
         </div>
 
         <div
@@ -871,12 +1039,13 @@ function ScratchCard({
           role="progressbar"
           aria-label="Scratch completion"
           aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progress}
+          aria-valuemax={target}
+          aria-valuenow={scratchCount}
         >
           <span
             style={{
               width: `${progress}%`,
+              transition: 'width 0.25s ease',
             }}
           />
         </div>
@@ -884,22 +1053,23 @@ function ScratchCard({
 
       {!revealed && (
         <div className="zg-scratch-help">
-          <p>
+          <p aria-live="polite">
             {canvasUnavailable
               ? 'The scratch surface is unavailable. Please reload.'
-              : progress >= 90
-                ? 'Almost there! Clear the remaining coating and edges.'
-                : 'Your result stays hidden until the surface is fully cleared.'}
+              : remaining === 1
+                ? 'Just one more scratch to reveal your surprise!'
+                : `${remaining} more scratches to reveal your surprise!`}
           </p>
 
           <button
             type="button"
             disabled={
-              !enabled || canvasUnavailable
+              !enabled ||
+              canvasUnavailable
             }
             tabIndex={enabled ? 0 : -1}
             onClick={scratchNextStrip}
-            title="Press Enter or Space to scratch one strip"
+            title="Use this button to complete one scratch"
           >
             Scratch next strip
           </button>
@@ -909,39 +1079,64 @@ function ScratchCard({
   )
 }
 
-/* ======================================================
+/* ==========================================
    MAIN GAMES PAGE
-====================================================== */
+========================================== */
 
 function GamesExperience() {
   const theme = useSiteTheme()
 
-  /* ====================================================
+  /* ========================================
      GAME CONFIGURATION
-  ==================================================== */
+  ======================================== */
 
   const [gameConfig, setGameConfig] =
-    useState<GameConfig>(() => readGameConfig())
+    useState<GameConfig>(
+      () => readGameConfig()
+    )
+
+  const [roundScratchCount, setRoundScratchCount] =
+    useState<number>(
+      () => getRequiredScratches(
+        readGameConfig()
+      )
+    )
 
   useEffect(() => {
+    let mounted = true
+
     fetchGameConfig()
-      .then(cfg => {
-        setGameConfig(cfg)
+      .then(config => {
+        if (mounted) {
+          setGameConfig(config)
+        }
       })
-      .catch(err => {
-        console.warn('Unable to load live game configuration:', err)
+      .catch(error => {
+        console.warn(
+          'Unable to load live game configuration:',
+          error
+        )
       })
 
-    return subscribeGameConfig(() => {
-      setGameConfig(readGameConfig())
-    })
+    const unsubscribe =
+      subscribeGameConfig(() => {
+        if (!mounted) return
+
+        setGameConfig(readGameConfig())
+      })
+
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
   }, [])
 
-  /* ====================================================
+  /* ========================================
      GAME STATE
-  ==================================================== */
+  ======================================== */
 
-  const [navOpen, setNavOpen] = useState(false)
+  const [navOpen, setNavOpen] =
+    useState(false)
 
   const [phase, setPhase] =
     useState<GamePhase>('intro')
@@ -952,7 +1147,8 @@ function GamesExperience() {
   const [result, setResult] =
     useState<GameResult | null>(null)
 
-  const [round, setRound] = useState(0)
+  const [round, setRound] =
+    useState(0)
 
   const selectionLock = useRef(false)
 
@@ -971,14 +1167,16 @@ function GamesExperience() {
     revealed
 
   const won =
-    revealed && result?.kind === 'win'
+    revealed &&
+    result?.kind === 'win'
 
   const lost =
-    revealed && result?.kind === 'lose'
+    revealed &&
+    result?.kind === 'lose'
 
-  /* ====================================================
+  /* ========================================
      ANIMATION TIMING
-  ==================================================== */
+  ======================================== */
 
   useEffect(() => {
     const reducedMotion =
@@ -1020,7 +1218,9 @@ function GamesExperience() {
 
     const timer = window.setTimeout(
       () => setPhase(transition.next),
-      reducedMotion ? 40 : transition.delay
+      reducedMotion
+        ? 40
+        : transition.delay
     )
 
     return () => {
@@ -1028,14 +1228,16 @@ function GamesExperience() {
     }
   }, [phase])
 
-  /* ====================================================
+  /* ========================================
      ACCESSIBILITY FOCUS
-  ==================================================== */
+  ======================================== */
 
   useEffect(() => {
     if (phase === 'scratch') {
       scratchBackRef.current
-        ?.querySelector<HTMLButtonElement>('button')
+        ?.querySelector<HTMLButtonElement>(
+          'button'
+        )
         ?.focus({
           preventScroll: true,
         })
@@ -1048,14 +1250,16 @@ function GamesExperience() {
     }
   }, [phase])
 
-  /* ====================================================
+  /* ========================================
      MOBILE NAVIGATION
-  ==================================================== */
+  ======================================== */
 
   useEffect(() => {
     if (!navOpen) return
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (
+      event: KeyboardEvent
+    ) => {
       if (event.key === 'Escape') {
         setNavOpen(false)
       }
@@ -1090,12 +1294,12 @@ function GamesExperience() {
     }
   }, [navOpen])
 
-  /* ====================================================
+  /* ========================================
      CHOOSE CARD
 
-     The selected card determines the reward.
-     There is no random winning chance.
-  ==================================================== */
+     Snapshot the scratch requirement at
+     the start of each game round.
+  ======================================== */
 
   const chooseCard = (index: number) => {
     if (
@@ -1113,14 +1317,18 @@ function GamesExperience() {
       gameConfig
     )
 
+    setRoundScratchCount(
+      getRequiredScratches(gameConfig)
+    )
+
     setResult(selectedResult)
     setSelected(index)
     setPhase('centering')
   }
 
-  /* ====================================================
+  /* ========================================
      RESET GAME
-  ==================================================== */
+  ======================================== */
 
   const resetGame = () => {
     selectionLock.current = false
@@ -1132,9 +1340,9 @@ function GamesExperience() {
     setPhase('intro')
   }
 
-  /* ====================================================
+  /* ========================================
      REVEAL RESULT
-  ==================================================== */
+  ======================================== */
 
   const revealResult = () => {
     setPhase(current =>
@@ -1148,12 +1356,13 @@ function GamesExperience() {
     phase === 'spread' ||
     phase === 'choose'
 
-  /* ====================================================
+  /* ========================================
      HEADING MESSAGE
-  ==================================================== */
+  ======================================== */
 
   const message =
-    !gameConfig.enabled && phase === 'choose'
+    !gameConfig.enabled &&
+    phase === 'choose'
       ? 'The game is temporarily unavailable.'
       : phase === 'intro'
         ? 'Your little adventure begins…'
@@ -1164,14 +1373,14 @@ function GamesExperience() {
             : phase === 'flipping'
               ? 'Something is waiting for you.'
               : phase === 'scratch'
-                ? 'Scratch fully. Unlock your luck.'
+                ? `Complete ${roundScratchCount} scratches. Unlock your luck.`
                 : won
                   ? 'A little win. A big celebration.'
                   : 'Your next lucky moment awaits.'
 
-  /* ====================================================
-     MAIN UI
-  ==================================================== */
+  /* ========================================
+     PAGE RENDER
+  ======================================== */
 
   return (
     <main
@@ -1180,17 +1389,13 @@ function GamesExperience() {
     >
       <GamingBackground />
 
-      {/* ==================================================
-          HEADER
-      ================================================== */}
+      {/* HEADER */}
 
       <header className="zg-site-header">
         <nav
           className="zg-topbar"
           aria-label="Zen Café navigation"
         >
-          {/* BRAND */}
-
           <a
             href="/#home"
             className="zg-brand"
@@ -1206,8 +1411,6 @@ function GamesExperience() {
               <small>JAFFNA</small>
             </span>
           </a>
-
-          {/* DESKTOP NAVIGATION */}
 
           <div className="zg-desktop-nav">
             {navLinks.map(
@@ -1230,8 +1433,6 @@ function GamesExperience() {
               Games
             </a>
           </div>
-
-          {/* HEADER ACTIONS */}
 
           <div className="zg-nav-actions">
             <ThemeToggle
@@ -1269,9 +1470,7 @@ function GamesExperience() {
           </div>
         </nav>
 
-        {/* ==================================================
-            MOBILE NAVIGATION
-        ================================================== */}
+        {/* MOBILE NAVIGATION */}
 
         {navOpen && (
           <>
@@ -1355,9 +1554,7 @@ function GamesExperience() {
         )}
       </header>
 
-      {/* ==================================================
-          PAGE CONTENT
-      ================================================== */}
+      {/* PAGE CONTENT */}
 
       <div className="zg-container">
         {/* HERO */}
@@ -1383,7 +1580,10 @@ function GamesExperience() {
           <div className="zg-how-it-works">
             <span>Choose a card</span>
             <i aria-hidden="true" />
-            <span>Scratch fully</span>
+            <span>
+              Scratch{' '}
+              {getRequiredScratches(gameConfig)} times
+            </span>
             <i aria-hidden="true" />
             <span>Discover</span>
           </div>
@@ -1404,9 +1604,7 @@ function GamesExperience() {
           )}
         </section>
 
-        {/* ==================================================
-            GAME SHELL
-        ================================================== */}
+        {/* GAME SHELL */}
 
         <section
           id="game"
@@ -1417,8 +1615,6 @@ function GamesExperience() {
             lost ? 'result-lose' : '',
           ].join(' ')}
         >
-          {/* NEON BORDER */}
-
           <div
             className="zg-table-neon"
             aria-hidden="true"
@@ -1426,8 +1622,6 @@ function GamesExperience() {
             <span />
             <span />
           </div>
-
-          {/* WIN CONFETTI */}
 
           {won && (
             <WinCelebration
@@ -1446,7 +1640,8 @@ function GamesExperience() {
               role="status"
               aria-live="polite"
             >
-              {choosing && gameConfig.enabled ? (
+              {choosing &&
+              gameConfig.enabled ? (
                 <>
                   Choose your{' '}
                   <em>winning card</em>
@@ -1466,9 +1661,7 @@ function GamesExperience() {
             </div>
           </div>
 
-          {/* ==================================================
-              FIVE CARDS
-          ================================================== */}
+          {/* FIVE CARDS */}
 
           <div className="zg-deal-stage">
             <div
@@ -1530,14 +1723,10 @@ function GamesExperience() {
                         !isSelected
                   }
                 >
-                  {/* CARD GLOW */}
-
                   <div
                     className="zg-card-ground-glow"
                     aria-hidden="true"
                   />
-
-                  {/* CARD FLIP */}
 
                   <div
                     className={[
@@ -1560,9 +1749,9 @@ function GamesExperience() {
                         chooseCard(index)
                       }
                       aria-hidden={showBack}
-                      aria-label={`Choose mystery card ${
-                        index + 1
-                      }`}
+                      aria-label={
+                        `Choose mystery card ${index + 1}`
+                      }
                     >
                       <span className="zg-photo">
                         <span
@@ -1609,8 +1798,7 @@ function GamesExperience() {
                               className="zg-back-emblem"
                               aria-hidden="true"
                             >
-                              {revealed &&
-                              !won
+                              {revealed && !won
                                 ? '♡'
                                 : '✦'}
                             </span>
@@ -1634,10 +1822,11 @@ function GamesExperience() {
                             <ScratchCard
                               key={`scratch-${round}`}
                               result={result}
-                              enabled={
-                                scratchEnabled
-                              }
+                              enabled={scratchEnabled}
                               revealed={revealed}
+                              requiredScratches={
+                                roundScratchCount
+                              }
                               onReveal={
                                 revealResult
                               }
@@ -1656,15 +1845,13 @@ function GamesExperience() {
             })}
           </div>
 
-          {/* ==================================================
-              RESULT CAPTION
-          ================================================== */}
+          {/* RESULT CAPTION */}
 
           <div className="zg-stage-caption">
             {scratchEnabled && (
               <p>
-                Clear the entire surface to unlock
-                your result.
+                Complete {roundScratchCount}{' '}
+                scratches to unlock your result.
               </p>
             )}
 
@@ -1722,9 +1909,7 @@ function GamesExperience() {
           </div>
         </section>
 
-        {/* ==================================================
-            FOOTER
-        ================================================== */}
+        {/* FOOTER */}
 
         <footer className="zg-footer">
           <div className="zg-footer-brand">
@@ -1750,11 +1935,12 @@ function GamesExperience() {
   )
 }
 
-/* ======================================================
+/* ==========================================
    MOUNT REACT APPLICATION
-====================================================== */
+========================================== */
 
-const rootElement = document.getElementById('root')
+const rootElement =
+  document.getElementById('root')
 
 if (!rootElement) {
   throw new Error(

@@ -1,3 +1,4 @@
+
 import { getAdminAuthHeaders } from '../../admin-auth'
 import {
   useEffect,
@@ -6,11 +7,13 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type CSSProperties,
 } from 'react'
 
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Eye,
   EyeOff,
   ImagePlus,
@@ -77,12 +80,10 @@ type ImageUploadResponse = {
 }
 
 /* ==========================================
-   CONFIGURATION
+   CONSTANTS
 ========================================== */
 
-const FALLBACK_IMAGE =
-  '/assets/menu-panda-main.png'
-
+const FALLBACK_IMAGE = '/assets/menu-panda-main.png'
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
 const ALLOWED_IMAGE_TYPES = [
@@ -91,36 +92,16 @@ const ALLOWED_IMAGE_TYPES = [
   'image/webp',
 ]
 
-/*
-  IMPORTANT:
-
-  This upload route must be implemented or
-  confirmed in the Zen Café backend.
-
-  It is deliberately isolated here so the
-  actual R2 upload endpoint can be changed
-  without rewriting the Products page.
-
-  Expected request:
-    POST /api/products/:id/image
-    multipart/form-data
-    field: image
-
-  Expected JSON response:
-    { success: true, image: "https://..." }
-
-  The returned image may also be an R2 key
-  if that is what your existing menuStore
-  and image resolver expect.
-*/
-
-function productImageUploadEndpoint(
-  productId: string,
-): string {
-  return (
-    `/api/products/` +
-    `${encodeURIComponent(productId)}/image`
-  )
+const EMPTY_DRAFT: EditDraft = {
+  name: '',
+  category: '',
+  description: '',
+  ingredients: '',
+  serving: '',
+  price: '',
+  available: true,
+  featured: false,
+  isNew: false,
 }
 
 /* ==========================================
@@ -128,18 +109,20 @@ function productImageUploadEndpoint(
 ========================================== */
 
 function formatPrice(value?: number): string {
-  return typeof value === 'number' &&
-    Number.isFinite(value)
-    ? `LKR ${value.toLocaleString('en-LK', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      })}`
-    : 'Not set'
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value)
+  ) {
+    return 'Not set'
+  }
+
+  return `LKR ${value.toLocaleString('en-LK', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`
 }
 
-function getInitialDraft(
-  product: MenuItem,
-): EditDraft {
+function getInitialDraft(product: MenuItem): EditDraft {
   return {
     name: product.name,
     category: product.category,
@@ -160,15 +143,12 @@ function getErrorMessage(
   error: unknown,
   fallback: string,
 ): string {
-  return error instanceof Error &&
-    error.message.trim()
+  return error instanceof Error && error.message.trim()
     ? error.message
     : fallback
 }
 
-function validateImageFile(
-  file: File,
-): string | null {
+function validateImageFile(file: File): string | null {
   if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
     return 'Please select a JPG, PNG, or WebP image.'
   }
@@ -184,6 +164,40 @@ function validateImageFile(
   return null
 }
 
+function getExistingCategories(
+  products: MenuItem[],
+): string[] {
+  const unique = new Map<string, string>()
+
+  for (const product of products) {
+    const category = product.category?.trim()
+
+    if (!category) continue
+
+    const key = category.toLocaleLowerCase()
+
+    if (!unique.has(key)) {
+      unique.set(key, category)
+    }
+  }
+
+  return [...unique.values()].sort((a, b) =>
+    a.localeCompare(b, undefined, {
+      sensitivity: 'base',
+    }),
+  )
+}
+
+/* ==========================================
+   IMAGE UPLOAD SERVICE
+========================================== */
+
+function productImageUploadEndpoint(
+  productId: string,
+): string {
+  return `/api/products/${encodeURIComponent(productId)}/image`
+}
+
 function extractUploadedImage(
   payload: ImageUploadResponse,
 ): string {
@@ -195,10 +209,7 @@ function extractUploadedImage(
     payload.url ||
     payload.key
 
-  if (
-    typeof image !== 'string' ||
-    !image.trim()
-  ) {
+  if (typeof image !== 'string' || !image.trim()) {
     throw new Error(
       'The image upload response did not include an image URL or storage key.',
     )
@@ -206,10 +217,6 @@ function extractUploadedImage(
 
   return image.trim()
 }
-
-/* ==========================================
-   IMAGE UPLOAD SERVICE
-========================================== */
 
 async function uploadProductImage(
   productId: string,
@@ -224,8 +231,6 @@ async function uploadProductImage(
   const formData = new FormData()
   formData.append('image', file, file.name)
 
-  // Authenticate using the existing Zen Café admin token.
-  // Do not manually set Content-Type for FormData.
   const response = await fetch(
     productImageUploadEndpoint(productId),
     {
@@ -242,15 +247,12 @@ async function uploadProductImage(
     let message = ''
 
     try {
-      const errorPayload =
+      const payload =
         (await response.json()) as ImageUploadResponse
 
-      message =
-        errorPayload.error ||
-        errorPayload.message ||
-        ''
+      message = payload.error || payload.message || ''
     } catch {
-      // The server may return a non-JSON response.
+      // A non-JSON error response is possible.
     }
 
     if (response.status === 401) {
@@ -269,14 +271,14 @@ async function uploadProductImage(
 
     if (response.status === 404) {
       throw new Error(
-        'Product image upload endpoint not found (HTTP 404). Verify the updated Cloudflare Worker has been deployed.',
+        'Product image upload endpoint not found (HTTP 404). Verify that the Cloudflare Worker has been deployed.',
       )
     }
 
     if (response.status === 413) {
       throw new Error(
         message ||
-          'The selected image exceeds the 5 MB upload limit.',
+          'The selected image exceeds the upload limit.',
       )
     }
 
@@ -308,12 +310,8 @@ async function uploadProductImage(
   return extractUploadedImage(payload)
 }
 
-
 /* ==========================================
-   REUSABLE PRODUCT IMAGE
-
-   Resolves existing stored image references
-   through the current menuStore.
+   PRODUCT IMAGE
 ========================================== */
 
 function ProductImage({
@@ -351,14 +349,10 @@ function ProductImage({
           if (url.startsWith('blob:')) {
             URL.revokeObjectURL(url)
           }
-
           return
         }
 
-        objectUrl = url.startsWith('blob:')
-          ? url
-          : null
-
+        objectUrl = url.startsWith('blob:') ? url : null
         setSource(url || FALLBACK_IMAGE)
       })
       .catch(() => {
@@ -382,10 +376,330 @@ function ProductImage({
       alt={product.name}
       onError={event => {
         event.currentTarget.onerror = null
-        event.currentTarget.src =
-          FALLBACK_IMAGE
+        event.currentTarget.src = FALLBACK_IMAGE
       }}
     />
+  )
+}
+
+/* ==========================================
+   CATEGORY SELECTOR
+
+   Uses the categories already present
+   in the menu catalog.
+========================================== */
+
+type CategorySelectorProps = {
+  value: string
+  categories: string[]
+  disabled: boolean
+  onChange: (category: string) => void
+}
+
+function CategorySelector({
+  value,
+  categories,
+  disabled,
+  onChange,
+}: CategorySelectorProps) {
+  const [addingNew, setAddingNew] = useState(false)
+  const [newCategory, setNewCategory] = useState('')
+  const [categoryError, setCategoryError] = useState('')
+
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const availableCategories = useMemo(() => {
+    const unique = new Map<string, string>()
+
+    for (const category of [...categories, value]) {
+      const trimmed = category.trim()
+
+      if (!trimmed) continue
+
+      const key = trimmed.toLocaleLowerCase()
+
+      if (!unique.has(key)) {
+        unique.set(key, trimmed)
+      }
+    }
+
+    return [...unique.values()].sort((a, b) =>
+      a.localeCompare(b, undefined, {
+        sensitivity: 'base',
+      }),
+    )
+  }, [categories, value])
+
+  useEffect(() => {
+    if (addingNew) {
+      inputRef.current?.focus()
+    }
+  }, [addingNew])
+
+  const addCategory = () => {
+    const normalized = newCategory.trim().replace(/\s+/g, ' ')
+
+    if (!normalized) {
+      setCategoryError('Enter a category name.')
+      return
+    }
+
+    if (normalized.length > 80) {
+      setCategoryError(
+        'Category name must be 80 characters or fewer.',
+      )
+      return
+    }
+
+    const existing = availableCategories.find(
+      category =>
+        category.toLocaleLowerCase() ===
+        normalized.toLocaleLowerCase(),
+    )
+
+    // Reuse the existing category instead of
+    // creating a duplicate with different casing.
+    onChange(existing || normalized)
+
+    setAddingNew(false)
+    setNewCategory('')
+    setCategoryError('')
+  }
+
+  const selectStyle: CSSProperties = {
+    width: '100%',
+    minHeight: '48px',
+    padding: '11px 42px 11px 14px',
+    border: '1px solid #e4cfc4',
+    borderRadius: '10px',
+    background: '#ffffff',
+    color: '#35231e',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    outlineOffset: '3px',
+  }
+
+  return (
+    <div
+      className="za-category-selector"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '9px',
+        marginBottom: '20px',
+      }}
+    >
+      <label
+        htmlFor="za-edit-product-category"
+        style={{
+          display: 'block',
+          fontSize: '13px',
+          fontWeight: 700,
+          color: '#3b241e',
+        }}
+      >
+        Category
+      </label>
+
+      {!addingNew ? (
+        <div style={{ position: 'relative' }}>
+          <select
+            id="za-edit-product-category"
+            value={value}
+            required
+            disabled={disabled}
+            onChange={event => {
+              const next = event.target.value
+
+              if (next === '__add_new_category__') {
+                setAddingNew(true)
+                setNewCategory('')
+                setCategoryError('')
+                return
+              }
+
+              onChange(next)
+            }}
+            style={selectStyle}
+          >
+            {!value && (
+              <option value="">
+                Select a category
+              </option>
+            )}
+
+            {availableCategories.map(category => (
+              <option
+                key={category.toLocaleLowerCase()}
+                value={category}
+              >
+                {category}
+              </option>
+            ))}
+
+            <option
+              value="__add_new_category__"
+              style={{ fontWeight: 700 }}
+            >
+              + Add New Category
+            </option>
+          </select>
+
+          <ChevronDown
+            size={18}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              right: '14px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              pointerEvents: 'none',
+              color: '#a32722',
+            }}
+          />
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: '14px',
+            border: '1px solid #ead4c9',
+            borderRadius: '12px',
+            background: '#fff9f5',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '10px',
+              color: '#a32722',
+              fontWeight: 700,
+              fontSize: '13px',
+            }}
+          >
+            <Plus size={16} />
+            Add New Category
+          </div>
+
+          <input
+            ref={inputRef}
+            type="text"
+            value={newCategory}
+            maxLength={80}
+            placeholder="Enter category name"
+            disabled={disabled}
+            onChange={event => {
+              setNewCategory(event.target.value)
+              setCategoryError('')
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                addCategory()
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setAddingNew(false)
+                setCategoryError('')
+              }
+            }}
+            style={{
+              width: '100%',
+              minHeight: '45px',
+              border: '1px solid #e4cfc4',
+              borderRadius: '9px',
+              padding: '10px 12px',
+              background: '#ffffff',
+              fontSize: '13px',
+              boxSizing: 'border-box',
+            }}
+          />
+
+          {categoryError && (
+            <p
+              role="alert"
+              style={{
+                color: '#a32722',
+                fontSize: '12px',
+                marginTop: '8px',
+              }}
+            >
+              {categoryError}
+            </p>
+          )}
+
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              justifyContent: 'flex-end',
+              marginTop: '12px',
+            }}
+          >
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => {
+                setAddingNew(false)
+                setNewCategory('')
+                setCategoryError('')
+              }}
+              style={{
+                padding: '9px 13px',
+                border: '1px solid #e4cfc4',
+                borderRadius: '8px',
+                background: '#ffffff',
+                color: '#573b31',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              disabled={disabled || !newCategory.trim()}
+              onClick={addCategory}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 13px',
+                border: 'none',
+                borderRadius: '8px',
+                background: '#a32722',
+                color: '#ffffff',
+                fontWeight: 700,
+                cursor: 'pointer',
+                opacity:
+                  disabled || !newCategory.trim()
+                    ? 0.6
+                    : 1,
+              }}
+            >
+              <Check size={15} />
+              Use Category
+            </button>
+          </div>
+        </div>
+      )}
+
+      <small
+        style={{
+          fontSize: '11px',
+          color: '#907a70',
+          lineHeight: 1.5,
+        }}
+      >
+        Choose an existing category or add a new one.
+        New categories are saved when you save the product.
+      </small>
+    </div>
   )
 }
 
@@ -397,40 +711,20 @@ export default function Products({
   onNavigate,
   query = '',
 }: Props) {
-  /* ========================================
-     PRODUCT STATE
-  ======================================== */
+  const [catalog, setCatalog] = useState<MenuItem[]>(
+    () => readMenuCatalog(),
+  )
 
-  const [catalog, setCatalog] =
-    useState<MenuItem[]>(
-      () => readMenuCatalog(),
-    )
+  const [filter, setFilter] = useState<Filter>('all')
+  const [search, setSearch] = useState('')
 
-  const [filter, setFilter] =
-    useState<Filter>('all')
+  const [editing, setEditing] = useState<MenuItem | null>(
+    null,
+  )
 
-  const [search, setSearch] =
-    useState('')
-
-  const [editing, setEditing] =
-    useState<MenuItem | null>(null)
-
-  const [draft, setDraft] =
-    useState<EditDraft>({
-      name: '',
-      category: '',
-      description: '',
-      ingredients: '',
-      serving: '',
-      price: '',
-      available: true,
-      featured: false,
-      isNew: false,
-    })
-
-  /* ========================================
-     IMAGE EDIT STATE
-  ======================================== */
+  const [draft, setDraft] = useState<EditDraft>(
+    EMPTY_DRAFT,
+  )
 
   const [selectedImage, setSelectedImage] =
     useState<File | null>(null)
@@ -438,36 +732,23 @@ export default function Products({
   const [imagePreview, setImagePreview] =
     useState<string | null>(null)
 
-  const [imageError, setImageError] =
-    useState('')
-
+  const [imageError, setImageError] = useState('')
   const [draggingImage, setDraggingImage] =
     useState(false)
 
-  const imageInputRef =
-    useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
-  /* ========================================
-     PAGE STATE
-  ======================================== */
-
-  const [saving, setSaving] =
-    useState(false)
+  const [saving, setSaving] = useState(false)
 
   const [busyId, setBusyId] =
     useState<string | null>(null)
 
-  const [error, setError] =
-    useState('')
-
-  const [editError, setEditError] =
-    useState('')
-
-  const [loading, setLoading] =
-    useState(false)
+  const [error, setError] = useState('')
+  const [editError, setEditError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   /* ========================================
-     SYNC PRODUCT CATALOG
+     LOAD AND SUBSCRIBE TO CATALOG
   ======================================== */
 
   useEffect(() => {
@@ -498,12 +779,11 @@ export default function Products({
         }
       })
 
-    const unsubscribe =
-      subscribeMenuCatalog(() => {
-        if (active) {
-          setCatalog(readMenuCatalog())
-        }
-      })
+    const unsubscribe = subscribeMenuCatalog(() => {
+      if (active) {
+        setCatalog(readMenuCatalog())
+      }
+    })
 
     return () => {
       active = false
@@ -512,7 +792,7 @@ export default function Products({
   }, [])
 
   /* ========================================
-     IMAGE PREVIEW LIFECYCLE
+     IMAGE PREVIEW
   ======================================== */
 
   useEffect(() => {
@@ -521,8 +801,7 @@ export default function Products({
       return
     }
 
-    const objectUrl =
-      URL.createObjectURL(selectedImage)
+    const objectUrl = URL.createObjectURL(selectedImage)
 
     setImagePreview(objectUrl)
 
@@ -532,7 +811,7 @@ export default function Products({
   }, [selectedImage])
 
   /* ========================================
-     FILTERING AND COUNTS
+     PRODUCTS AND CATEGORY OPTIONS
   ======================================== */
 
   const products = useMemo(
@@ -540,17 +819,18 @@ export default function Products({
     [catalog],
   )
 
-  const filtered = useMemo(() => {
-    const localSearch =
-      search.trim().toLowerCase()
+  const existingCategories = useMemo(
+    () => getExistingCategories(products),
+    [products],
+  )
 
-    const globalSearch =
-      query.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    const localSearch = search.trim().toLowerCase()
+    const globalSearch = query.trim().toLowerCase()
 
     return products.filter(product => {
       const matchesType =
-        filter === 'all' ||
-        product.kind === filter
+        filter === 'all' || product.kind === filter
 
       const searchableText = [
         product.name,
@@ -585,7 +865,7 @@ export default function Products({
   ).length
 
   /* ========================================
-     IMAGE FILE SELECTION
+     IMAGE SELECTION
   ======================================== */
 
   async function selectImage(
@@ -593,8 +873,7 @@ export default function Products({
   ): Promise<void> {
     if (!file || saving) return
 
-    const validationError =
-      validateImageFile(file)
+    const validationError = validateImageFile(file)
 
     if (validationError) {
       setImageError(validationError)
@@ -615,12 +894,10 @@ export default function Products({
   function handleImageChange(
     event: ChangeEvent<HTMLInputElement>,
   ): void {
-    const file =
-      event.target.files?.[0] || null
+    const file = event.target.files?.[0] || null
 
     void selectImage(file)
 
-    // Allow selecting the same file again.
     event.target.value = ''
   }
 
@@ -637,7 +914,7 @@ export default function Products({
   }
 
   /* ========================================
-     START EDIT
+     EDIT PRODUCT
   ======================================== */
 
   function startEdit(product: MenuItem): void {
@@ -655,13 +932,7 @@ export default function Products({
     setError('')
   }
 
-  /* ========================================
-     UPDATE EDIT DRAFT
-  ======================================== */
-
-  function updateDraft<
-    K extends keyof EditDraft
-  >(
+  function updateDraft<K extends keyof EditDraft>(
     key: K,
     value: EditDraft[K],
   ): void {
@@ -673,15 +944,10 @@ export default function Products({
     setEditError('')
   }
 
-  /* ========================================
-     CLOSE EDIT WITH CONFIRMATION
-  ======================================== */
-
   async function closeEdit(): Promise<void> {
     if (saving || !editing) return
 
-    const initialDraft =
-      getInitialDraft(editing)
+    const initialDraft = getInitialDraft(editing)
 
     const hasUnsavedChanges =
       JSON.stringify(draft) !==
@@ -689,12 +955,11 @@ export default function Products({
       selectedImage !== null
 
     if (hasUnsavedChanges) {
-      const confirmed =
-        await AdminAlert.confirm(
-          'Discard Changes?',
-          'Your unsaved product changes, including any selected replacement image, will be lost.',
-          'Yes, Discard',
-        )
+      const confirmed = await AdminAlert.confirm(
+        'Discard Changes?',
+        'Your unsaved product changes, including any selected replacement image, will be lost.',
+        'Yes, Discard',
+      )
 
       if (!confirmed) return
     }
@@ -707,14 +972,7 @@ export default function Products({
   }
 
   /* ========================================
-     SAVE PRODUCT EDIT
-
-     Text-only changes use the existing
-     updateMenuProduct function.
-
-     Image changes first upload to R2 using
-     the configured backend upload endpoint,
-     then save the returned image reference.
+     SAVE PRODUCT
   ======================================== */
 
   async function saveEdit(
@@ -729,8 +987,7 @@ export default function Products({
     const priceText = draft.price.trim()
 
     if (!name) {
-      const message =
-        'Product name is required.'
+      const message = 'Product name is required.'
 
       setEditError(message)
 
@@ -743,8 +1000,7 @@ export default function Products({
     }
 
     if (!category) {
-      const message =
-        'Product category is required.'
+      const message = 'Product category is required.'
 
       setEditError(message)
 
@@ -757,9 +1013,7 @@ export default function Products({
     }
 
     const price =
-      priceText === ''
-        ? undefined
-        : Number(priceText)
+      priceText === '' ? undefined : Number(priceText)
 
     if (
       priceText !== '' &&
@@ -769,8 +1023,7 @@ export default function Products({
         price < 0
       )
     ) {
-      const message =
-        'Enter a valid price in LKR.'
+      const message = 'Enter a valid price in LKR.'
 
       setEditError(message)
 
@@ -790,29 +1043,22 @@ export default function Products({
       let uploadedImage: string | undefined
 
       if (selectedImage) {
-        uploadedImage =
-          await uploadProductImage(
-            editing.id,
-            selectedImage,
-          )
+        uploadedImage = await uploadProductImage(
+          editing.id,
+          selectedImage,
+        )
       }
 
       await updateMenuProduct(editing.id, {
         name,
         category,
-        description:
-          draft.description.trim(),
-        ingredients:
-          draft.ingredients.trim(),
-        serving:
-          draft.serving.trim(),
+        description: draft.description.trim(),
+        ingredients: draft.ingredients.trim(),
+        serving: draft.serving.trim(),
         price,
         available: draft.available,
         featured: draft.featured,
         isNew: draft.isNew,
-
-        // Preserve existing image unless
-        // a replacement was uploaded.
         ...(uploadedImage
           ? { image: uploadedImage }
           : {}),
@@ -821,6 +1067,8 @@ export default function Products({
       setEditing(null)
       setSelectedImage(null)
       setImagePreview(null)
+      setImageError('')
+      setEditError('')
       setError('')
 
       await AdminAlert.productUpdated()
@@ -842,7 +1090,7 @@ export default function Products({
   }
 
   /* ========================================
-     TOGGLE PRODUCT AVAILABILITY
+     PRODUCT AVAILABILITY
   ======================================== */
 
   async function toggleAvailability(
@@ -850,21 +1098,19 @@ export default function Products({
   ): Promise<void> {
     if (busyId || saving) return
 
-    const nextAvailable =
-      !product.available
+    const nextAvailable = !product.available
 
-    const confirmed =
-      await AdminAlert.confirm(
-        nextAvailable
-          ? 'Make Product Available?'
-          : 'Hide This Product?',
-        nextAvailable
-          ? `"${product.name}" will become available on the menu.`
-          : `"${product.name}" will be hidden from the menu.`,
-        nextAvailable
-          ? 'Yes, Make Available'
-          : 'Yes, Hide Product',
-      )
+    const confirmed = await AdminAlert.confirm(
+      nextAvailable
+        ? 'Make Product Available?'
+        : 'Hide This Product?',
+      nextAvailable
+        ? `"${product.name}" will become available on the menu.`
+        : `"${product.name}" will be hidden from the menu.`,
+      nextAvailable
+        ? 'Yes, Make Available'
+        : 'Yes, Hide Product',
+    )
 
     if (!confirmed) return
 
@@ -872,12 +1118,9 @@ export default function Products({
     setError('')
 
     try {
-      await updateMenuProduct(
-        product.id,
-        {
-          available: nextAvailable,
-        },
-      )
+      await updateMenuProduct(product.id, {
+        available: nextAvailable,
+      })
 
       await AdminAlert.success(
         nextAvailable
@@ -913,10 +1156,9 @@ export default function Products({
   ): Promise<void> {
     if (busyId || saving) return
 
-    const confirmed =
-      await AdminAlert.confirmDelete(
-        `"${product.name}"`,
-      )
+    const confirmed = await AdminAlert.confirmDelete(
+      `"${product.name}"`,
+    )
 
     if (!confirmed) return
 
@@ -945,7 +1187,7 @@ export default function Products({
   }
 
   /* ========================================
-     PAGE UI
+     PAGE RENDER
   ======================================== */
 
   return (
@@ -956,18 +1198,13 @@ export default function Products({
       <div className="za-products-breadcrumb">
         <button
           type="button"
-          onClick={() =>
-            onNavigate('dashboard')
-          }
+          onClick={() => onNavigate('dashboard')}
         >
           Dashboard
         </button>
 
         <span>/</span>
-
-        <strong>
-          Menu / Products
-        </strong>
+        <strong>Menu / Products</strong>
       </div>
 
       {/* PAGE HEADER */}
@@ -978,9 +1215,7 @@ export default function Products({
             MENU MANAGEMENT
           </p>
 
-          <h1>
-            Menu / Products
-          </h1>
+          <h1>Menu / Products</h1>
 
           <p>
             Manage the food and drinks
@@ -991,16 +1226,14 @@ export default function Products({
         <button
           type="button"
           className="za-primary"
-          onClick={() =>
-            onNavigate('add-product')
-          }
+          onClick={() => onNavigate('add-product')}
         >
           <Plus size={18} />
           Add New Product
         </button>
       </div>
 
-      {/* SUMMARY CARDS */}
+      {/* SUMMARY */}
 
       <div className="za-product-summary">
         <div className="za-product-summary-card">
@@ -1024,13 +1257,9 @@ export default function Products({
         <div className="za-product-summary-card">
           <span>Available</span>
           <strong>{availableCount}</strong>
-          <small>
-            Currently marked available
-          </small>
+          <small>Currently marked available</small>
         </div>
       </div>
-
-      {/* PAGE ERROR */}
 
       {error && (
         <p
@@ -1044,7 +1273,6 @@ export default function Products({
       {/* PRODUCT MANAGEMENT */}
 
       <section className="za-product-management-card">
-
         <div className="za-product-management-top">
           <div>
             <h2>
@@ -1063,7 +1291,7 @@ export default function Products({
           </span>
         </div>
 
-        {/* FILTERS AND SEARCH */}
+        {/* FILTERS */}
 
         <div className="za-product-management-filters">
           <div className="za-filter-pills">
@@ -1078,16 +1306,10 @@ export default function Products({
                 key={value}
                 type="button"
                 className={
-                  filter === value
-                    ? 'active'
-                    : ''
+                  filter === value ? 'active' : ''
                 }
-                aria-pressed={
-                  filter === value
-                }
-                onClick={() =>
-                  setFilter(value)
-                }
+                aria-pressed={filter === value}
+                onClick={() => setFilter(value)}
               >
                 {label}
               </button>
@@ -1126,14 +1348,9 @@ export default function Products({
             <tbody>
               {filtered.map(product => (
                 <tr key={product.id}>
-
-                  {/* PRODUCT */}
-
                   <td>
                     <div className="za-management-product">
-                      <ProductImage
-                        product={product}
-                      />
+                      <ProductImage product={product} />
 
                       <div>
                         <strong>
@@ -1150,12 +1367,9 @@ export default function Products({
                                   'rgba(163,39,34,0.12)',
                                 color: '#a32722',
                                 fontWeight: 700,
-                                textTransform:
-                                  'uppercase',
-                                letterSpacing:
-                                  '0.06em',
-                                verticalAlign:
-                                  'middle',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.06em',
+                                verticalAlign: 'middle',
                               }}
                             >
                               Featured
@@ -1171,8 +1385,6 @@ export default function Products({
                     </div>
                   </td>
 
-                  {/* TYPE */}
-
                   <td>
                     <span className="za-type-pill">
                       {product.kind === 'drink'
@@ -1181,19 +1393,11 @@ export default function Products({
                     </span>
                   </td>
 
-                  {/* CATEGORY */}
-
-                  <td>
-                    {product.category}
-                  </td>
-
-                  {/* PRICE */}
+                  <td>{product.category}</td>
 
                   <td className="za-management-price">
                     {formatPrice(product.price)}
                   </td>
-
-                  {/* AVAILABILITY */}
 
                   <td>
                     <button
@@ -1204,13 +1408,10 @@ export default function Products({
                           : ''
                       }`}
                       disabled={
-                        busyId !== null ||
-                        saving
+                        busyId !== null || saving
                       }
                       onClick={() =>
-                        void toggleAvailability(
-                          product,
-                        )
+                        void toggleAvailability(product)
                       }
                     >
                       {product.available ? (
@@ -1225,8 +1426,6 @@ export default function Products({
                     </button>
                   </td>
 
-                  {/* ACTIONS */}
-
                   <td>
                     <div className="za-table-actions">
                       <button
@@ -1235,8 +1434,7 @@ export default function Products({
                         title={`Edit ${product.name}`}
                         aria-label={`Edit ${product.name}`}
                         disabled={
-                          busyId !== null ||
-                          saving
+                          busyId !== null || saving
                         }
                         onClick={() =>
                           startEdit(product)
@@ -1251,13 +1449,10 @@ export default function Products({
                         title={`Delete ${product.name}`}
                         aria-label={`Delete ${product.name}`}
                         disabled={
-                          busyId !== null ||
-                          saving
+                          busyId !== null || saving
                         }
                         onClick={() =>
-                          void requestDelete(
-                            product,
-                          )
+                          void requestDelete(product)
                         }
                       >
                         <Trash2 size={16} />
@@ -1269,7 +1464,7 @@ export default function Products({
             </tbody>
           </table>
 
-          {/* EMPTY OR LOADING STATE */}
+          {/* EMPTY STATE */}
 
           {filtered.length === 0 && (
             <div className="za-management-empty">
@@ -1279,7 +1474,9 @@ export default function Products({
                     size={30}
                     className="animate-spin"
                   />
+
                   <h3>Loading products...</h3>
+
                   <p>
                     Fetching latest menu items
                     from PostgreSQL database.
@@ -1288,7 +1485,9 @@ export default function Products({
               ) : (
                 <>
                   <Search size={30} />
+
                   <h3>No products found</h3>
+
                   <p>
                     Try changing the filter
                     or search term.
@@ -1310,8 +1509,7 @@ export default function Products({
           role="presentation"
           onMouseDown={event => {
             if (
-              event.target ===
-              event.currentTarget
+              event.target === event.currentTarget
             ) {
               void closeEdit()
             }
@@ -1323,8 +1521,7 @@ export default function Products({
             aria-modal="true"
             aria-labelledby="za-edit-title"
           >
-
-            {/* MODAL HEADER */}
+            {/* HEADER */}
 
             <div className="za-edit-dialog-head">
               <div>
@@ -1340,9 +1537,7 @@ export default function Products({
               <button
                 type="button"
                 className="za-icon-button"
-                onClick={() => {
-                  void closeEdit()
-                }}
+                onClick={() => void closeEdit()}
                 disabled={saving}
                 aria-label="Close editor"
               >
@@ -1350,10 +1545,7 @@ export default function Products({
               </button>
             </div>
 
-            <form
-              onSubmit={saveEdit}
-              noValidate
-            >
+            <form onSubmit={saveEdit} noValidate>
 
               {/* PRODUCT NAME */}
 
@@ -1374,26 +1566,22 @@ export default function Products({
                 />
               </label>
 
-              {/* CATEGORY */}
+              {/* ==================================
+                  CATEGORY DROPDOWN
+              ================================== */}
 
-              <label>
-                Category
-
-                <input
-                  required
-                  value={draft.category}
-                  disabled={saving}
-                  onChange={event =>
-                    updateDraft(
-                      'category',
-                      event.target.value,
-                    )
-                  }
-                />
-              </label>
+              <CategorySelector
+                key={editing.id}
+                value={draft.category}
+                categories={existingCategories}
+                disabled={saving}
+                onChange={category =>
+                  updateDraft('category', category)
+                }
+              />
 
               {/* ==================================
-                  PRODUCT IMAGE EDITING
+                  PRODUCT IMAGE
               ================================== */}
 
               <div
@@ -1405,8 +1593,7 @@ export default function Products({
                 <div
                   style={{
                     display: 'flex',
-                    justifyContent:
-                      'space-between',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
                     gap: '12px',
                     marginBottom: '10px',
@@ -1447,8 +1634,7 @@ export default function Products({
                       minWidth: '118px',
                       height: '118px',
                       borderRadius: '14px',
-                      border:
-                        '1px solid #eadbd2',
+                      border: '1px solid #eadbd2',
                       background: '#faf4ee',
                       overflow: 'hidden',
                     }}
@@ -1498,7 +1684,7 @@ export default function Products({
                     </span>
                   </div>
 
-                  {/* IMAGE UPLOAD CONTROL */}
+                  {/* UPLOAD CONTROL */}
 
                   <div
                     style={{
@@ -1511,12 +1697,8 @@ export default function Products({
                       type="file"
                       accept="image/jpeg,image/png,image/webp"
                       disabled={saving}
-                      onChange={
-                        handleImageChange
-                      }
-                      style={{
-                        display: 'none',
-                      }}
+                      onChange={handleImageChange}
+                      style={{ display: 'none' }}
                       aria-label="Select replacement product image"
                     />
 
@@ -1540,22 +1722,18 @@ export default function Products({
                         const file =
                           event.dataTransfer.files[0]
 
-                        void selectImage(
-                          file || null,
-                        )
+                        void selectImage(file || null)
                       }}
                       style={{
-                        border:
-                          draggingImage
-                            ? '2px dashed #a32722'
-                            : '1px dashed #d9bcb0',
+                        border: draggingImage
+                          ? '2px dashed #a32722'
+                          : '1px dashed #d9bcb0',
                         borderRadius: '12px',
                         padding: '13px 10px',
                         textAlign: 'center',
-                        background:
-                          draggingImage
-                            ? '#fff1ec'
-                            : '#fffaf7',
+                        background: draggingImage
+                          ? '#fff1ec'
+                          : '#fffaf7',
                       }}
                     >
                       <UploadCloud
@@ -1609,15 +1787,14 @@ export default function Products({
                   </div>
                 </div>
 
-                {/* SELECTED IMAGE DETAILS */}
+                {/* SELECTED IMAGE */}
 
                 {selectedImage && (
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent:
-                        'space-between',
+                      justifyContent: 'space-between',
                       gap: '10px',
                       marginTop: '10px',
                       padding: '9px 11px',
@@ -1648,20 +1825,16 @@ export default function Products({
 
                     <button
                       type="button"
-                      onClick={
-                        removeSelectedImage
-                      }
+                      onClick={removeSelectedImage}
                       disabled={saving}
                       aria-label="Discard selected image"
                       title="Discard selected image"
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent:
-                          'center',
+                        justifyContent: 'center',
                         border: 'none',
-                        background:
-                          'transparent',
+                        background: 'transparent',
                         color: '#a32722',
                         cursor: 'pointer',
                       }}
@@ -1823,7 +1996,7 @@ export default function Products({
                 New Arrival
               </label>
 
-              {/* EDIT ERROR */}
+              {/* ERROR */}
 
               {editError && (
                 <p
@@ -1834,15 +2007,13 @@ export default function Products({
                 </p>
               )}
 
-              {/* MODAL ACTIONS */}
+              {/* ACTIONS */}
 
               <div className="za-edit-dialog-actions">
                 <button
                   type="button"
                   className="za-edit-cancel"
-                  onClick={() => {
-                    void closeEdit()
-                  }}
+                  onClick={() => void closeEdit()}
                   disabled={saving}
                 >
                   <ArrowLeft size={16} />

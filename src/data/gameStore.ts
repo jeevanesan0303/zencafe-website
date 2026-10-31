@@ -1,6 +1,14 @@
 
 import { getAdminAuthHeaders } from '../admin-auth'
 
+/* ==========================================
+   ZEN CAFÉ — SCRATCH GAME STORE
+========================================== */
+
+/* ==========================================
+   TYPES
+========================================== */
+
 export type GamePrize = {
   productId: string
   title: string
@@ -15,14 +23,42 @@ export type GameCardConfig = {
 
 export type GameConfig = {
   enabled: boolean
+  scratchCount: number
   cards: GameCardConfig[]
 }
 
-export const GAME_CONFIG_KEY = 'zen-cafe-scratch-game-v1'
-export const GAME_CONFIG_EVENT = 'zen-cafe-scratch-game-change'
+/* ==========================================
+   CONSTANTS
+========================================== */
+
+export const GAME_CONFIG_KEY =
+  'zen-cafe-scratch-game-v1'
+
+export const GAME_CONFIG_EVENT =
+  'zen-cafe-scratch-game-change'
+
+export const DEFAULT_SCRATCH_COUNT = 25
+
+export const MIN_SCRATCH_COUNT = 5
+
+export const MAX_SCRATCH_COUNT = 100
+
+export const TOTAL_GAME_CARDS = 5
+
+export const REQUIRED_WINNING_CARDS = 2
+
+const GAME_SETTINGS_ENDPOINT =
+  '/api/games/settings'
+
+/* ==========================================
+   DEFAULT CONFIGURATION
+========================================== */
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {
   enabled: true,
+
+  scratchCount: DEFAULT_SCRATCH_COUNT,
+
   cards: [
     {
       cardId: 1,
@@ -57,115 +93,339 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   ],
 }
 
+/* ==========================================
+   INTERNAL TYPES
+========================================== */
+
+type UnknownRecord = Record<string, unknown>
+
+type GameSettingsResponse = {
+  config?: unknown
+  enabled?: unknown
+  scratchCount?: unknown
+  cards?: unknown
+  error?: unknown
+  message?: unknown
+}
+
+/* ==========================================
+   HELPERS
+========================================== */
+
+function isRecord(
+  value: unknown
+): value is UnknownRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value)
+  )
+}
+
+function isValidScratchCount(
+  value: unknown
+): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_SCRATCH_COUNT &&
+    value <= MAX_SCRATCH_COUNT
+  )
+}
+
+export function normalizeScratchCount(
+  value: unknown
+): number {
+  return isValidScratchCount(value)
+    ? value
+    : DEFAULT_SCRATCH_COUNT
+}
+
+/* ==========================================
+   VALIDATE GAME CONFIGURATION
+========================================== */
+
 export function isValidGameConfig(
   value: unknown
 ): value is GameConfig {
-  if (!value || typeof value !== 'object') {
+  if (!isRecord(value)) {
     return false
   }
 
-  const config = value as Partial<GameConfig>
-
   if (
-    typeof config.enabled !== 'boolean' ||
-    !Array.isArray(config.cards) ||
-    config.cards.length !== 5
+    typeof value.enabled !== 'boolean' ||
+    !isValidScratchCount(value.scratchCount) ||
+    !Array.isArray(value.cards) ||
+    value.cards.length !== TOTAL_GAME_CARDS
   ) {
     return false
   }
 
   const cardIds = new Set<number>()
+
   let winningCards = 0
 
-  for (const card of config.cards) {
+  for (const item of value.cards) {
+    if (!isRecord(item)) {
+      return false
+    }
+
+    const cardId = item.cardId
+
     if (
-      !card ||
-      !Number.isInteger(card.cardId) ||
-      card.cardId < 1 ||
-      card.cardId > 5 ||
-      cardIds.has(card.cardId)
+      typeof cardId !== 'number' ||
+      !Number.isInteger(cardId) ||
+      cardId < 1 ||
+      cardId > TOTAL_GAME_CARDS ||
+      cardIds.has(cardId)
     ) {
       return false
     }
 
-    cardIds.add(card.cardId)
+    cardIds.add(cardId)
 
-    if (card.prize !== null) {
-      winningCards++
+    const prize = item.prize
 
-      if (
-        !card.prize ||
-        typeof card.prize.productId !== 'string' ||
-        !card.prize.productId.trim() ||
-        typeof card.prize.title !== 'string' ||
-        !card.prize.title.trim() ||
-        typeof card.prize.detail !== 'string' ||
-        typeof card.prize.emoji !== 'string'
-      ) {
-        return false
-      }
+    if (prize === null) {
+      continue
+    }
+
+    winningCards += 1
+
+    if (!isRecord(prize)) {
+      return false
+    }
+
+    if (
+      typeof prize.productId !== 'string' ||
+      !prize.productId.trim() ||
+      typeof prize.title !== 'string' ||
+      !prize.title.trim() ||
+      typeof prize.detail !== 'string' ||
+      typeof prize.emoji !== 'string'
+    ) {
+      return false
     }
   }
 
-  return winningCards === 2
+  return (
+    cardIds.size === TOTAL_GAME_CARDS &&
+    winningCards === REQUIRED_WINNING_CARDS
+  )
 }
 
-export function readGameConfig(): GameConfig {
+/* ==========================================
+   NORMALIZE LEGACY CONFIGURATION
+
+   Older saved configurations may not
+   contain scratchCount.
+
+   Those configurations automatically
+   receive the default value of 25.
+
+   Invalid explicit scratch counts are
+   rejected instead of silently replaced.
+========================================== */
+
+export function normalizeGameConfig(
+  value: unknown
+): GameConfig | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const scratchCount =
+    value.scratchCount === undefined
+      ? DEFAULT_SCRATCH_COUNT
+      : value.scratchCount
+
+  const normalized: unknown = {
+    ...value,
+    scratchCount,
+  }
+
+  if (!isValidGameConfig(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+/* ==========================================
+   STORAGE HELPERS
+========================================== */
+
+function notifyGameConfigChange(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.dispatchEvent(
+    new Event(GAME_CONFIG_EVENT)
+  )
+}
+
+function persistGameConfig(
+  config: GameConfig
+): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
   try {
-    const stored = localStorage.getItem(GAME_CONFIG_KEY)
+    window.localStorage.setItem(
+      GAME_CONFIG_KEY,
+      JSON.stringify(config)
+    )
+  } catch (error) {
+    console.warn(
+      'Unable to cache game configuration:',
+      error
+    )
+  }
+
+  notifyGameConfigChange()
+}
+
+/* ==========================================
+   READ GAME CONFIGURATION
+========================================== */
+
+export function readGameConfig(): GameConfig {
+  if (typeof window === 'undefined') {
+    return DEFAULT_GAME_CONFIG
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      GAME_CONFIG_KEY
+    )
 
     if (stored) {
       const parsed: unknown = JSON.parse(stored)
 
-      if (isValidGameConfig(parsed)) {
-        return parsed
+      const normalized =
+        normalizeGameConfig(parsed)
+
+      if (normalized) {
+        return normalized
       }
     }
   } catch (error) {
-    console.warn('Unable to read game configuration:', error)
+    console.warn(
+      'Unable to read game configuration:',
+      error
+    )
   }
 
   return DEFAULT_GAME_CONFIG
 }
 
-export async function fetchGameConfig(): Promise<GameConfig> {
-  try {
-    const res = await fetch('/api/games/settings', {
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-    if (res.ok) {
-      const data = await res.json()
-      const rawConfig = data.config || {
-        enabled: data.enabled ?? true,
-        cards: data.cards || [],
-      }
-      if (isValidGameConfig(rawConfig)) {
-        localStorage.setItem(GAME_CONFIG_KEY, JSON.stringify(rawConfig))
-        window.dispatchEvent(new Event(GAME_CONFIG_EVENT))
-        return rawConfig
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to fetch game configuration from API:', err)
+/* ==========================================
+   PARSE API RESPONSE
+========================================== */
+
+function extractGameConfig(
+  response: unknown
+): GameConfig | null {
+  if (!isRecord(response)) {
+    return null
   }
-  return readGameConfig()
+
+  const data =
+    response as GameSettingsResponse
+
+  /*
+   * Supports:
+   *
+   * { config: { enabled, scratchCount, cards } }
+   *
+   * and:
+   *
+   * { enabled, scratchCount, cards }
+   */
+
+  const rawConfig =
+    data.config !== undefined
+      ? data.config
+      : {
+          enabled: data.enabled,
+          scratchCount: data.scratchCount,
+          cards: data.cards,
+        }
+
+  return normalizeGameConfig(rawConfig)
 }
 
-export async function saveGameConfig(config: GameConfig): Promise<void> {
+/* ==========================================
+   FETCH LIVE GAME CONFIGURATION
+========================================== */
+
+export async function fetchGameConfig():
+  Promise<GameConfig> {
+  try {
+    const response = await fetch(
+      GAME_SETTINGS_ENDPOINT,
+      {
+        method: 'GET',
+
+        headers: {
+          Accept: 'application/json',
+        },
+
+        cache: 'no-store',
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(
+        `Unable to fetch game settings (${response.status}).`
+      )
+    }
+
+    const data: unknown =
+      await response.json()
+
+    const config =
+      extractGameConfig(data)
+
+    if (!config) {
+      throw new Error(
+        'The game API returned an invalid configuration.'
+      )
+    }
+
+    persistGameConfig(config)
+
+    return config
+  } catch (error) {
+    console.warn(
+      'Failed to fetch live game configuration:',
+      error
+    )
+
+    return readGameConfig()
+  }
+}
+
+/* ==========================================
+   SAVE GAME CONFIGURATION
+
+   Important:
+   - Validate first.
+   - Send to API.
+   - Check the API response.
+   - Cache only after successful save.
+========================================== */
+
+export async function saveGameConfig(
+  config: GameConfig
+): Promise<void> {
   if (!isValidGameConfig(config)) {
     throw new Error(
-      'Exactly two of the five cards must have valid prizes.'
+      'Invalid game settings. Exactly two of the five cards must have valid prizes, and the scratch count must be between 5 and 100.'
     )
   }
-
-  localStorage.setItem(
-    GAME_CONFIG_KEY,
-    JSON.stringify(config)
-  )
-
-  window.dispatchEvent(new Event(GAME_CONFIG_EVENT))
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -173,43 +433,165 @@ export async function saveGameConfig(config: GameConfig): Promise<void> {
     ...getAdminAuthHeaders(),
   }
 
-  const res = await fetch('/api/games/settings', {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify(config),
-  })
-
-  if (!res.ok) {
-    let errMsg = 'Failed to persist game settings.'
-    try {
-      const errData = await res.json()
-      if (errData.error || errData.message) {
-        errMsg = errData.error || errData.message
-      }
-    } catch {
-      // ignore json parse error
-    }
-    throw new Error(errMsg)
-  }
+  let response: Response
 
   try {
-    const result = await res.json()
-    if (result.config && isValidGameConfig(result.config)) {
-      localStorage.setItem(GAME_CONFIG_KEY, JSON.stringify(result.config))
-    }
+    response = await fetch(
+      GAME_SETTINGS_ENDPOINT,
+      {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(config),
+      }
+    )
   } catch {
-    // ignore
+    throw new Error(
+      'Unable to connect to the game settings API. Please check your connection and try again.'
+    )
   }
+
+  if (!response.ok) {
+    let errorMessage =
+      'Failed to save game settings.'
+
+    try {
+      const errorData: unknown =
+        await response.json()
+
+      if (isRecord(errorData)) {
+        if (
+          typeof errorData.error === 'string'
+        ) {
+          errorMessage = errorData.error
+        } else if (
+          typeof errorData.message === 'string'
+        ) {
+          errorMessage = errorData.message
+        }
+      }
+    } catch {
+      // Keep the default error message.
+    }
+
+    throw new Error(errorMessage)
+  }
+
+  /*
+   * Some APIs return a saved configuration,
+   * while others return only a success message.
+   *
+   * We check the returned configuration when
+   * one is provided.
+   */
+
+  let savedConfig: GameConfig = config
+
+  const responseText =
+    await response.text()
+
+  if (responseText.trim()) {
+    let responseData: unknown
+
+    try {
+      responseData = JSON.parse(
+        responseText
+      )
+    } catch {
+      throw new Error(
+        'The game API returned an invalid JSON response.'
+      )
+    }
+
+    if (isRecord(responseData)) {
+      const hasReturnedConfig =
+        responseData.config !== undefined ||
+        (
+          responseData.enabled !== undefined &&
+          responseData.cards !== undefined
+        )
+
+      if (hasReturnedConfig) {
+        const returnedConfig =
+          extractGameConfig(responseData)
+
+        if (!returnedConfig) {
+          throw new Error(
+            'The game API returned invalid saved settings.'
+          )
+        }
+
+        /*
+         * An older backend may silently discard
+         * scratchCount. Reject that response.
+         */
+
+        if (
+          returnedConfig.scratchCount !==
+          config.scratchCount
+        ) {
+          throw new Error(
+            'The game API did not preserve the required scratch count. Please update the backend game settings endpoint.'
+          )
+        }
+
+        savedConfig = returnedConfig
+      }
+    }
+  }
+
+  /*
+   * Cache the accepted configuration.
+   *
+   * Note: If the backend returns only a success
+   * message, this does not prove that it stored
+   * scratchCount. The admin page performs a
+   * separate GET verification.
+   */
+
+  persistGameConfig(savedConfig)
 }
+
+/* ==========================================
+   SUBSCRIBE TO GAME CONFIGURATION CHANGES
+========================================== */
 
 export function subscribeGameConfig(
   callback: () => void
 ): () => void {
-  window.addEventListener('storage', callback)
-  window.addEventListener(GAME_CONFIG_EVENT, callback)
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  const onStorageChange = (
+    event: StorageEvent
+  ) => {
+    if (
+      event.key === GAME_CONFIG_KEY ||
+      event.key === null
+    ) {
+      callback()
+    }
+  }
+
+  window.addEventListener(
+    'storage',
+    onStorageChange
+  )
+
+  window.addEventListener(
+    GAME_CONFIG_EVENT,
+    callback
+  )
 
   return () => {
-    window.removeEventListener('storage', callback)
-    window.removeEventListener(GAME_CONFIG_EVENT, callback)
+    window.removeEventListener(
+      'storage',
+      onStorageChange
+    )
+
+    window.removeEventListener(
+      GAME_CONFIG_EVENT,
+      callback
+    )
   }
 }
