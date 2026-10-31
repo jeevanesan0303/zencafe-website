@@ -65,8 +65,6 @@ type Filter =
   | 'confirmed'
   | 'modification_proposed'
   | 'rejected'
-  | 'completed'
-  | 'cancelled'
 
 type PageSize = 10 | 25 | 50
 
@@ -109,8 +107,6 @@ const FILTERS: {
     label: 'Modified',
   },
   { value: 'rejected', label: 'Rejected' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'cancelled', label: 'Cancelled' },
 ]
 
 /* ==========================================

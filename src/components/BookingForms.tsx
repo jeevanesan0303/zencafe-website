@@ -46,7 +46,7 @@ const emptyRoom: RoomForm = {
 }
 
 const ROOM_GUEST_OPTIONS = Array.from(
-  { length: 20 },
+  { length: 15 },
   (_, index) => index + 1
 )
 
