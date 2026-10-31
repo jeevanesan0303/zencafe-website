@@ -1,4 +1,4 @@
-
+import { getAdminAuthHeaders } from '../../admin-auth'
 import {
   useEffect,
   useMemo,
@@ -224,46 +224,21 @@ async function uploadProductImage(
   const formData = new FormData()
   formData.append('image', file, file.name)
 
-  /*
-    Do not manually set Content-Type.
-    The browser adds the multipart boundary.
-
-    If the backend requires a bearer token,
-    this request must use the same auth
-    headers as the existing menuStore API.
-  */
-
+  // Authenticate using the existing Zen Café admin token.
+  // Do not manually set Content-Type for FormData.
   const response = await fetch(
     productImageUploadEndpoint(productId),
     {
       method: 'POST',
-      body: formData,
-      credentials: 'include',
       headers: {
+        ...getAdminAuthHeaders(),
         Accept: 'application/json',
       },
+      body: formData,
     },
   )
 
   if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(
-        'Product image upload endpoint not found (HTTP 404). The R2 upload API must be connected before image replacement can be saved.',
-      )
-    }
-
-    if (response.status === 401) {
-      throw new Error(
-        'Your admin session has expired or the image upload requires authentication.',
-      )
-    }
-
-    if (response.status === 403) {
-      throw new Error(
-        'You do not have permission to upload product images.',
-      )
-    }
-
     let message = ''
 
     try {
@@ -275,7 +250,34 @@ async function uploadProductImage(
         errorPayload.message ||
         ''
     } catch {
-      // The server may return a non-JSON error.
+      // The server may return a non-JSON response.
+    }
+
+    if (response.status === 401) {
+      throw new Error(
+        message ||
+          'Your administrator session has expired. Please log in again.',
+      )
+    }
+
+    if (response.status === 403) {
+      throw new Error(
+        message ||
+          'You do not have permission to upload product images.',
+      )
+    }
+
+    if (response.status === 404) {
+      throw new Error(
+        'Product image upload endpoint not found (HTTP 404). Verify the updated Cloudflare Worker has been deployed.',
+      )
+    }
+
+    if (response.status === 413) {
+      throw new Error(
+        message ||
+          'The selected image exceeds the 5 MB upload limit.',
+      )
     }
 
     throw new Error(
@@ -305,6 +307,7 @@ async function uploadProductImage(
 
   return extractUploadedImage(payload)
 }
+
 
 /* ==========================================
    REUSABLE PRODUCT IMAGE

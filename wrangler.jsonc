@@ -18,6 +18,10 @@
     {
       "binding": "GALLERY_BUCKET",
       "bucket_name": "zencafe-gallery"
+    },
+    {
+      "binding": "PRODUCTS_BUCKET",
+      "bucket_name": "zencafe-products"
     }
   ],
   "triggers": {
