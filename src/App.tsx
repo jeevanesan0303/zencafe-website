@@ -306,10 +306,7 @@ export default function App() {
               </div>
 
               <p className="section-copy max-w-[420px]">
-                Gather your favourite people, celebrate
-                life's special occasions, and make
-                unforgettable memories in our private
-                dining space.
+                
               </p>
             </div>
 
