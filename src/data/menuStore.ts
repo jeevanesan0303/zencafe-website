@@ -42,9 +42,11 @@ const LEGACY_WARRIOR_IMAGE_REPLACEMENTS: Record<
 /* ==========================================
    PRODUCT NORMALISATION
 ========================================== */
-
 const inferDietaryType = (item: Partial<MenuItem>) => {
-  if (item.kind !== 'food') {
+  if (
+    item.kind !== 'food' &&
+    item.kind !== 'snacks'
+  ) {
     return undefined
   }
 
@@ -103,10 +105,13 @@ const inferDairyType = (item: Partial<MenuItem>) => {
 
   return 'dairy-free'
 }
-
 const normalise = (item: MenuItem): MenuItem => {
   const kind: MenuKind =
-    item.kind === 'food' ? 'food' : 'drink'
+    item.kind === 'food' ||
+    item.kind === 'drink' ||
+    item.kind === 'snacks'
+      ? item.kind
+      : 'drink'
 
   const price =
     typeof item.price === 'number' &&
@@ -120,23 +125,19 @@ const normalise = (item: MenuItem): MenuItem => {
 
     kind,
 
-    name:
-      item.name?.trim() || 'Unnamed Product',
+    name: item.name?.trim() || 'Unnamed Product',
 
     category:
       item.category?.trim() ||
       (kind === 'food'
         ? 'Other Food'
-        : 'Other Drinks'),
+        : kind === 'snacks'
+          ? 'Other Snacks'
+          : 'Other Drinks'),
 
-    description:
-      item.description?.trim() || '',
-
-    ingredients:
-      item.ingredients?.trim() || '',
-
-    serving:
-      item.serving?.trim() || '',
+    description: item.description?.trim() || '',
+    ingredients: item.ingredients?.trim() || '',
+    serving: item.serving?.trim() || '',
 
     image:
       LEGACY_WARRIOR_IMAGE_REPLACEMENTS[
@@ -157,7 +158,7 @@ const normalise = (item: MenuItem): MenuItem => {
     price,
 
     spiceLevel:
-      kind === 'food' &&
+      (kind === 'food' || kind === 'snacks') &&
       (
         item.spiceLevel === 'none' ||
         item.spiceLevel === 'mild' ||
@@ -168,8 +169,7 @@ const normalise = (item: MenuItem): MenuItem => {
         : undefined,
 
     createdAt:
-      item.createdAt ||
-      new Date().toISOString(),
+      item.createdAt || new Date().toISOString(),
 
     dietaryType: inferDietaryType({
       ...item,
@@ -358,21 +358,29 @@ export async function loadMenuCatalog(
    Use { all: true } in the admin dashboard.
 ========================================== */
 
+
 export async function refreshMenuCatalog(
   options?: {
     all?: boolean
     force?: boolean
-  }
+  },
 ): Promise<MenuItem[]> {
   const all = options?.all === true
   const force = options?.force === true
+
+  // Admin requests must not reuse a potentially
+  // incomplete public-product cache.
+  if (all) {
+    return loadMenuCatalog({ all: true })
+  }
 
   if (!force && menuCacheIsFresh()) {
     return catalogCache ?? []
   }
 
-  return loadMenuCatalog({ all })
+  return loadMenuCatalog({ all: false })
 }
+
 
 /* ==========================================
    READ MENU SYNCHRONOUSLY
@@ -1860,4 +1868,111 @@ export function isScratchRewardEligible(
       productId
     ) !== null
   )
+}
+/* ==========================================
+   ZEN CAFÉ — SHARED PRODUCT CATEGORIES
+
+   Single category source for:
+   - Add Product
+   - Edit Product
+
+   Categories are derived from the live
+   product catalog, not hardcoded defaults.
+========================================== */
+
+export type MenuCategories = Record<MenuKind, string[]>
+
+/**
+ * Extract unique categories from products.
+ * Food and drink categories are kept separate.
+ */
+
+export function getMenuCategoriesFromProducts(
+  products: MenuItem[]
+): MenuCategories {
+  const result: MenuCategories = {
+    food: [],
+    drink: [],
+    snacks: [],
+  }
+
+  const seen: Record<MenuKind, Set<string>> = {
+    food: new Set<string>(),
+    drink: new Set<string>(),
+    snacks: new Set<string>(),
+  }
+
+  for (const product of products) {
+    if (
+      product.kind !== 'food' &&
+      product.kind !== 'drink' &&
+      product.kind !== 'snacks'
+    ) {
+      continue
+    }
+
+    const category = product.category?.trim()
+
+    if (!category) continue
+
+    const key = category.toLocaleLowerCase()
+
+    if (seen[product.kind].has(key)) {
+      continue
+    }
+
+    seen[product.kind].add(key)
+    result[product.kind].push(category)
+  }
+
+  result.food.sort((a, b) =>
+    a.localeCompare(b)
+  )
+
+  result.drink.sort((a, b) =>
+    a.localeCompare(b)
+  )
+
+  result.snacks.sort((a, b) =>
+    a.localeCompare(b)
+  )
+
+  return result
+}
+
+/**
+ * Read categories from the currently
+ * loaded menu catalog.
+ */
+export function readMenuCategories(): MenuCategories {
+  return getMenuCategoriesFromProducts(
+    readMenuCatalog()
+  )
+}
+
+/**
+ * Retrieve categories from the live API.
+ *
+ * Use this in admin pages so unavailable
+ * products are also included.
+ */
+export async function loadMenuCategories():
+  Promise<MenuCategories> {
+  const products = await refreshMenuCatalog({
+    all: true,
+    force: true,
+  })
+
+  return getMenuCategoriesFromProducts(products)
+}
+
+/**
+ * Retrieve categories for one product type.
+ */
+export async function loadMenuCategoriesByKind(
+  kind: MenuKind
+): Promise<string[]> {
+  const categories = await loadMenuCategories()
+
+  return categories[kind]
 }

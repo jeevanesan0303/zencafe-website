@@ -1,13 +1,12 @@
 
-import { getAdminAuthHeaders } from '../../admin-auth'
 import {
   useEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
-  type FormEvent,
   type CSSProperties,
+  type FormEvent,
 } from 'react'
 
 import {
@@ -27,6 +26,8 @@ import {
   X,
 } from 'lucide-react'
 
+import { getAdminAuthHeaders } from '../../admin-auth'
+
 import {
   readMenuCatalog,
   loadMenuCatalog,
@@ -35,6 +36,7 @@ import {
   deleteMenuProduct,
   resolveStoredMenuImage,
   isStoredMenuImageRef,
+  getMenuCategoriesFromProducts,
 } from '../../data/menuStore'
 
 import type { MenuItem } from '../../data/menu'
@@ -84,6 +86,7 @@ type ImageUploadResponse = {
 ========================================== */
 
 const FALLBACK_IMAGE = '/assets/menu-panda-main.png'
+
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
 const ALLOWED_IMAGE_TYPES = [
@@ -164,30 +167,6 @@ function validateImageFile(file: File): string | null {
   return null
 }
 
-function getExistingCategories(
-  products: MenuItem[],
-): string[] {
-  const unique = new Map<string, string>()
-
-  for (const product of products) {
-    const category = product.category?.trim()
-
-    if (!category) continue
-
-    const key = category.toLocaleLowerCase()
-
-    if (!unique.has(key)) {
-      unique.set(key, category)
-    }
-  }
-
-  return [...unique.values()].sort((a, b) =>
-    a.localeCompare(b, undefined, {
-      sensitivity: 'base',
-    }),
-  )
-}
-
 /* ==========================================
    IMAGE UPLOAD SERVICE
 ========================================== */
@@ -252,7 +231,7 @@ async function uploadProductImage(
 
       message = payload.error || payload.message || ''
     } catch {
-      // A non-JSON error response is possible.
+      // The server may return a non-JSON error.
     }
 
     if (response.status === 401) {
@@ -383,10 +362,13 @@ function ProductImage({
 }
 
 /* ==========================================
-   CATEGORY SELECTOR
+   SHARED CATEGORY SELECTOR
 
-   Uses the categories already present
-   in the menu catalog.
+   Categories are derived from existing
+   products of the selected product type.
+
+   New categories become persistent when
+   the product is saved successfully.
 ========================================== */
 
 type CategorySelectorProps = {
@@ -436,8 +418,10 @@ function CategorySelector({
     }
   }, [addingNew])
 
-  const addCategory = () => {
-    const normalized = newCategory.trim().replace(/\s+/g, ' ')
+  function addCategory() {
+    const normalized = newCategory
+      .trim()
+      .replace(/\s+/g, ' ')
 
     if (!normalized) {
       setCategoryError('Enter a category name.')
@@ -457,10 +441,14 @@ function CategorySelector({
         normalized.toLocaleLowerCase(),
     )
 
-    // Reuse the existing category instead of
-    // creating a duplicate with different casing.
     onChange(existing || normalized)
 
+    setAddingNew(false)
+    setNewCategory('')
+    setCategoryError('')
+  }
+
+  function cancelAddCategory() {
     setAddingNew(false)
     setNewCategory('')
     setCategoryError('')
@@ -604,8 +592,7 @@ function CategorySelector({
 
               if (event.key === 'Escape') {
                 event.preventDefault()
-                setAddingNew(false)
-                setCategoryError('')
+                cancelAddCategory()
               }
             }}
             style={{
@@ -644,11 +631,7 @@ function CategorySelector({
             <button
               type="button"
               disabled={disabled}
-              onClick={() => {
-                setAddingNew(false)
-                setNewCategory('')
-                setCategoryError('')
-              }}
+              onClick={cancelAddCategory}
               style={{
                 padding: '9px 13px',
                 border: '1px solid #e4cfc4',
@@ -696,8 +679,9 @@ function CategorySelector({
           lineHeight: 1.5,
         }}
       >
-        Choose an existing category or add a new one.
-        New categories are saved when you save the product.
+        Categories are shared with Add Product and
+        filtered by product type. New categories are
+        saved when you save the product.
       </small>
     </div>
   )
@@ -718,13 +702,11 @@ export default function Products({
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
 
-  const [editing, setEditing] = useState<MenuItem | null>(
-    null,
-  )
+  const [editing, setEditing] =
+    useState<MenuItem | null>(null)
 
-  const [draft, setDraft] = useState<EditDraft>(
-    EMPTY_DRAFT,
-  )
+  const [draft, setDraft] =
+    useState<EditDraft>(EMPTY_DRAFT)
 
   const [selectedImage, setSelectedImage] =
     useState<File | null>(null)
@@ -819,10 +801,25 @@ export default function Products({
     [catalog],
   )
 
-  const existingCategories = useMemo(
-    () => getExistingCategories(products),
+  /*
+   * IMPORTANT:
+   * Use the same shared category helper as
+   * AddProduct.tsx.
+   *
+   * Food and Drink categories remain separate.
+   * Categories from unavailable products are
+   * included because the admin loads all items.
+   */
+  const categoriesByKind = useMemo(
+    () => getMenuCategoriesFromProducts(products),
     [products],
   )
+
+  const editCategories = useMemo(() => {
+    if (!editing) return []
+
+    return categoriesByKind[editing.kind] || []
+  }, [categoriesByKind, editing])
 
   const filtered = useMemo(() => {
     const localSearch = search.trim().toLowerCase()
@@ -1568,12 +1565,15 @@ export default function Products({
 
               {/* ==================================
                   CATEGORY DROPDOWN
+
+                  Shared with Add Product.
+                  Food/Drink categories separated.
               ================================== */}
 
               <CategorySelector
                 key={editing.id}
                 value={draft.category}
-                categories={existingCategories}
+                categories={editCategories}
                 disabled={saving}
                 onChange={category =>
                   updateDraft('category', category)

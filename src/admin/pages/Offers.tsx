@@ -18,6 +18,7 @@ import {
   EyeOff,
   Gift,
   ImagePlus,
+  Minus,
   Pencil,
   Plus,
   Search,
@@ -36,13 +37,47 @@ import {
   updateAdminOffer,
   deleteAdminOffer,
   subscribeAdminOffers,
+  calculateOfferPricing,
   type AdminOffer,
+  type OfferProduct,
+  type OfferType,
+  type OfferPricingMode,
+  type OfferDiscountType,
 } from '../../data/adminOfferStore'
+
+import { getVisibleMenu } from '../../data/menuStore'
+import type { MenuItem } from '../../data/menu'
+/* ==========================================
+   GET ALL MENU PRODUCTS
+   Food + Drink + Snacks
+========================================== */
+
+function getAllOfferProducts(): MenuItem[] {
+  return [
+    ...getVisibleMenu('food'),
+    ...getVisibleMenu('drink'),
+    ...getVisibleMenu('snacks'),
+  ]
+}
 
 import AdminAlert from '../utils/sweetAlert'
 
 /* ==========================================
-   TYPES
+   ZEN CAFÉ — OFFERS & PROMOTIONS
+
+   Supports:
+   - General promotions
+   - Single-product offers
+   - Combo offers
+   - Food / Drink / Snacks
+   - Product quantities
+   - Percentage and fixed discounts
+   - Custom final offer prices
+   - Live pricing calculations
+   - Existing offer CRUD
+   - Existing image processing
+   - Existing date restrictions
+   - Existing SweetAlert confirmations
 ========================================== */
 
 type Props = {
@@ -56,31 +91,62 @@ type StatusFilter =
   | 'inactive'
   | 'expired'
 
+type ProductFilter =
+  | 'all'
+  | 'food'
+  | 'drink'
+  | 'snacks'
+
 type OfferDraft = {
   title: string
   description: string
   code: string
-  discountType: 'percentage' | 'fixed'
+  discountType: OfferDiscountType
   discountValue: string
   startDate: string
   endDate: string
   active: boolean
+
+  offerType: OfferType
+  pricingMode: OfferPricingMode
+  customFinalPrice: string
+  products: OfferProduct[]
 }
 
-const EMPTY_DRAFT: OfferDraft = {
-  title: '',
-  description: '',
-  code: '',
-  discountType: 'percentage',
-  discountValue: '',
-  startDate: '',
-  endDate: '',
-  active: true,
+function emptyDraft(): OfferDraft {
+  return {
+    title: '',
+    description: '',
+    code: '',
+    discountType: 'percentage',
+    discountValue: '',
+    startDate: '',
+    endDate: '',
+    active: true,
+
+    offerType: 'general',
+    pricingMode: 'discount',
+    customFinalPrice: '',
+    products: [],
+  }
 }
 
 /* ==========================================
-   DATE HELPERS
+   HELPERS
 ========================================== */
+
+function money(value: number): string {
+  return `LKR ${value.toLocaleString('en-LK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+function roundMoney(value: number): number {
+  return Math.round(
+    (value + Number.EPSILON) * 100
+  ) / 100
+}
 
 function getToday(): string {
   const parts = new Intl.DateTimeFormat(
@@ -94,16 +160,13 @@ function getToday(): string {
   ).formatToParts(new Date())
 
   const year =
-    parts.find(part => part.type === 'year')
-      ?.value || ''
+    parts.find(p => p.type === 'year')?.value || ''
 
   const month =
-    parts.find(part => part.type === 'month')
-      ?.value || ''
+    parts.find(p => p.type === 'month')?.value || ''
 
   const day =
-    parts.find(part => part.type === 'day')
-      ?.value || ''
+    parts.find(p => p.type === 'day')?.value || ''
 
   return `${year}-${month}-${day}`
 }
@@ -121,15 +184,26 @@ function isValidDate(value: string): boolean {
   )
 }
 
+function formatDate(value: string): string {
+  if (!value) return '—'
+  if (!isValidDate(value)) return value
+
+  return new Date(
+    `${value}T00:00:00Z`
+  ).toLocaleDateString('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 function getOfferStatus(
   offer: AdminOffer
 ): 'active' | 'inactive' | 'scheduled' | 'expired' {
   const today = getToday()
 
-  if (
-    offer.endDate &&
-    offer.endDate < today
-  ) {
+  if (offer.endDate && offer.endDate < today) {
     return 'expired'
   }
 
@@ -148,29 +222,21 @@ function getOfferStatus(
 }
 
 function formatDiscount(offer: AdminOffer): string {
-  const amount = Number(offer.discountValue) || 0
+  if (
+    offer.pricingMode === 'custom' &&
+    offer.finalPrice !== undefined
+  ) {
+    return money(offer.finalPrice)
+  }
+
+  const value = Number(offer.discountValue) || 0
 
   return offer.discountType === 'percentage'
-    ? `${amount}% OFF`
-    : `LKR ${amount.toLocaleString('en-LK')} OFF`
+    ? `${value}% OFF`
+    : `${money(value)} OFF`
 }
 
-function formatDate(value: string): string {
-  if (!value) return '—'
-
-  if (!isValidDate(value)) return value
-
-  const date = new Date(`${value}T00:00:00Z`)
-
-  return date.toLocaleDateString('en-GB', {
-    timeZone: 'UTC',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
-function getErrorMessage(
+function errorMessage(
   error: unknown,
   fallback: string
 ): string {
@@ -179,7 +245,32 @@ function getErrorMessage(
     : fallback
 }
 
-function getOfferDraft(
+function productPrice(product: MenuItem): number {
+  const value = Number(product.price)
+
+  return Number.isFinite(value) && value >= 0
+    ? roundMoney(value)
+    : 0
+}
+
+function makeOfferProduct(
+  product: MenuItem,
+  quantity = 1
+): OfferProduct {
+  const unitPrice = productPrice(product)
+
+  return {
+    productId: product.id,
+    name: product.name,
+    kind: product.kind,
+    image: product.image,
+    quantity,
+    unitPrice,
+    lineTotal: roundMoney(unitPrice * quantity),
+  }
+}
+
+function draftFromOffer(
   offer: AdminOffer
 ): OfferDraft {
   return {
@@ -191,6 +282,19 @@ function getOfferDraft(
     startDate: offer.startDate || '',
     endDate: offer.endDate || '',
     active: offer.active,
+
+    offerType: offer.offerType || 'general',
+    pricingMode: offer.pricingMode || 'discount',
+
+    customFinalPrice:
+      offer.pricingMode === 'custom' &&
+      offer.finalPrice !== undefined
+        ? String(offer.finalPrice)
+        : '',
+
+    products: (offer.products || []).map(
+      product => ({ ...product })
+    ),
   }
 }
 
@@ -201,13 +305,13 @@ function getOfferDraft(
 async function prepareOfferImage(
   file: File
 ): Promise<string> {
-  const allowedTypes = [
+  const allowed = [
     'image/jpeg',
     'image/png',
     'image/webp',
   ]
 
-  if (!allowedTypes.includes(file.type)) {
+  if (!allowed.includes(file.type)) {
     throw new Error(
       'Please upload a JPG, PNG or WebP image.'
     )
@@ -240,7 +344,8 @@ async function prepareOfferImage(
         }
       )
 
-    const canvas = document.createElement('canvas')
+    const canvas =
+      document.createElement('canvas')
 
     const scale = Math.min(
       1,
@@ -296,7 +401,7 @@ async function prepareOfferImage(
 }
 
 /* ==========================================
-   OFFERS COMPONENT
+   COMPONENT
 ========================================== */
 
 export default function Offers({
@@ -305,6 +410,9 @@ export default function Offers({
 }: Props) {
   const [offers, setOffers] =
     useState<AdminOffer[]>(() => readAdminOffers())
+
+  const [catalog, setCatalog] =
+    useState<MenuItem[]>(() => getAllOfferProducts())
 
   const [filter, setFilter] =
     useState<StatusFilter>('all')
@@ -317,11 +425,19 @@ export default function Offers({
   const [formOpen, setFormOpen] = useState(false)
 
   const [draft, setDraft] =
-    useState<OfferDraft>({ ...EMPTY_DRAFT })
+    useState<OfferDraft>(emptyDraft)
+
+  const [productSearch, setProductSearch] =
+    useState('')
+
+  const [productFilter, setProductFilter] =
+    useState<ProductFilter>('all')
 
   const [offerImage, setOfferImage] = useState('')
   const [imageError, setImageError] = useState('')
-  const [imageLoading, setImageLoading] = useState(false)
+  const [imageLoading, setImageLoading] =
+    useState(false)
+
   const [saving, setSaving] = useState(false)
 
   const [busyId, setBusyId] =
@@ -332,7 +448,9 @@ export default function Offers({
 
   const [today, setToday] = useState(getToday)
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef =
+    useRef<HTMLInputElement>(null)
+
   const imageRequestRef = useRef(0)
   const formLockRef = useRef(false)
 
@@ -344,43 +462,50 @@ export default function Offers({
     let mounted = true
 
     const sync = () => {
-      if (mounted) {
-        setOffers(readAdminOffers())
-        setToday(getToday())
-      }
+      if (!mounted) return
+
+      setOffers(readAdminOffers())
+      setCatalog(getAllOfferProducts())
+      setToday(getToday())
     }
 
     const refresh = () => {
+      if (!mounted) return
+
       setToday(getToday())
+      setCatalog(getAllOfferProducts())
 
       void loadAdminOffers()
         .then(items => {
-          if (mounted) {
-            setOffers(items)
-            setError('')
-          }
+          if (!mounted) return
+
+          setOffers(items)
+          setError('')
         })
-        .catch(caughtError => {
-          if (mounted) {
-            setError(
-              getErrorMessage(
-                caughtError,
-                'Unable to refresh promotions.'
-              )
+        .catch(caught => {
+          if (!mounted) return
+
+          setError(
+            errorMessage(
+              caught,
+              'Unable to refresh promotions.'
             )
-          }
+          )
         })
     }
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (
+        document.visibilityState === 'visible'
+      ) {
         refresh()
       }
     }
 
     refresh()
 
-    const unsubscribe = subscribeAdminOffers(sync)
+    const unsubscribe =
+      subscribeAdminOffers(sync)
 
     window.addEventListener('focus', refresh)
 
@@ -398,7 +523,10 @@ export default function Offers({
       mounted = false
       unsubscribe()
 
-      window.removeEventListener('focus', refresh)
+      window.removeEventListener(
+        'focus',
+        refresh
+      )
 
       document.removeEventListener(
         'visibilitychange',
@@ -406,13 +534,12 @@ export default function Offers({
       )
 
       window.clearInterval(interval)
-
       imageRequestRef.current += 1
     }
   }, [])
 
   /* ==========================================
-     OFFER STATISTICS
+     STATISTICS
   ========================================== */
 
   const stats = useMemo(() => {
@@ -433,7 +560,7 @@ export default function Offers({
   }, [offers, today])
 
   /* ==========================================
-     FILTERED OFFERS
+     FILTERED PROMOTIONS
   ========================================== */
 
   const filtered = useMemo(() => {
@@ -450,21 +577,93 @@ export default function Offers({
             status === 'scheduled'
           : status === filter)
 
-      const text = [
+      const searchable = [
         offer.title,
         offer.description,
         offer.code,
+        ...(offer.products || []).map(
+          product => product.name || ''
+        ),
       ]
         .join(' ')
         .toLowerCase()
 
       return (
         matchesStatus &&
-        (!local || text.includes(local)) &&
-        (!global || text.includes(global))
+        (!local || searchable.includes(local)) &&
+        (!global || searchable.includes(global))
       )
     })
   }, [offers, filter, search, query, today])
+
+  /* ==========================================
+     PRODUCT CATALOG
+  ========================================== */
+
+  const filteredProducts = useMemo(() => {
+    const term =
+      productSearch.trim().toLowerCase()
+
+    return catalog.filter(product => {
+      const matchesKind =
+        productFilter === 'all' ||
+        product.kind === productFilter
+
+      const searchable = [
+        product.name,
+        product.category,
+        product.description,
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return (
+        product.available &&
+        matchesKind &&
+        (!term || searchable.includes(term))
+      )
+    })
+  }, [catalog, productSearch, productFilter])
+
+  const selectedProductIds = useMemo(
+    () =>
+      new Set(
+        draft.products.map(
+          product => product.productId
+        )
+      ),
+    [draft.products]
+  )
+
+  /* ==========================================
+     PRICING
+  ========================================== */
+
+  const discountValue =
+    Number(draft.discountValue) || 0
+
+  const customFinalPrice =
+    draft.customFinalPrice.trim() === ''
+      ? undefined
+      : Number(draft.customFinalPrice)
+
+  const pricing = useMemo(
+    () =>
+      calculateOfferPricing(
+        draft.products,
+        draft.discountType,
+        discountValue,
+        draft.pricingMode,
+        customFinalPrice
+      ),
+    [
+      draft.products,
+      draft.discountType,
+      discountValue,
+      draft.pricingMode,
+      customFinalPrice,
+    ]
+  )
 
   /* ==========================================
      DATE RESTRICTIONS
@@ -498,32 +697,47 @@ export default function Offers({
   const hasUnsavedChanges = useMemo(() => {
     if (!formOpen) return false
 
-    const originalDraft = editing
-      ? getOfferDraft(editing)
-      : EMPTY_DRAFT
-
-    const originalImage = editing?.image || ''
+    const original = editing
+      ? draftFromOffer(editing)
+      : emptyDraft()
 
     return (
       JSON.stringify(draft) !==
-        JSON.stringify(originalDraft) ||
-      offerImage !== originalImage
+        JSON.stringify(original) ||
+      offerImage !== (editing?.image || '')
     )
   }, [formOpen, editing, draft, offerImage])
 
   /* ==========================================
-     FORM RESET
+     FORM HELPERS
   ========================================== */
+
+  function updateDraft<K extends keyof OfferDraft>(
+    key: K,
+    value: OfferDraft[K]
+  ) {
+    setDraft(previous => ({
+      ...previous,
+      [key]: value,
+    }))
+
+    setFormError('')
+  }
 
   function resetForm() {
     imageRequestRef.current += 1
 
     setFormOpen(false)
     setEditing(null)
-    setDraft({ ...EMPTY_DRAFT })
+    setDraft(emptyDraft())
+
     setOfferImage('')
     setImageError('')
     setImageLoading(false)
+
+    setProductSearch('')
+    setProductFilter('all')
+
     setFormError('')
 
     if (fileInputRef.current) {
@@ -540,11 +754,12 @@ export default function Offers({
 
     try {
       if (hasUnsavedChanges) {
-        const confirmed = await AdminAlert.confirm(
-          'Discard Offer Changes?',
-          'You have unsaved promotion details. Closing this form will discard your changes.',
-          'Yes, Discard'
-        )
+        const confirmed =
+          await AdminAlert.confirm(
+            'Discard Offer Changes?',
+            'You have unsaved promotion details. Closing this form will discard your changes.',
+            'Yes, Discard'
+          )
 
         if (!confirmed) return
       }
@@ -555,21 +770,24 @@ export default function Offers({
     }
   }
 
-  /* ==========================================
-     OPEN CREATE / EDIT
-  ========================================== */
-
   function openCreate() {
     if (saving || busyId) return
 
     imageRequestRef.current += 1
 
     setToday(getToday())
+    setCatalog(getAllOfferProducts())
+
     setEditing(null)
-    setDraft({ ...EMPTY_DRAFT })
+    setDraft(emptyDraft())
+
     setOfferImage('')
     setImageError('')
     setImageLoading(false)
+
+    setProductSearch('')
+    setProductFilter('all')
+
     setFormError('')
     setFormOpen(true)
   }
@@ -580,38 +798,143 @@ export default function Offers({
     imageRequestRef.current += 1
 
     setToday(getToday())
+    setCatalog(getAllOfferProducts())
+
     setEditing(offer)
-    setDraft(getOfferDraft(offer))
+    setDraft(draftFromOffer(offer))
+
     setOfferImage(offer.image || '')
     setImageError('')
     setImageLoading(false)
+
+    setProductSearch('')
+    setProductFilter('all')
+
     setFormError('')
     setFormOpen(true)
   }
 
   /* ==========================================
-     UPDATE FORM FIELDS
+     OFFER TYPE
   ========================================== */
 
-  function updateDraft<K extends keyof OfferDraft>(
-    key: K,
-    value: OfferDraft[K]
-  ) {
+  function changeOfferType(type: OfferType) {
+    if (saving) return
+
     setDraft(previous => ({
       ...previous,
-      [key]: value,
+      offerType: type,
+      products:
+        type === 'general'
+          ? []
+          : type === 'single'
+            ? previous.products.slice(0, 1)
+            : previous.products,
     }))
 
     setFormError('')
   }
 
+  /* ==========================================
+     PRODUCT SELECTION
+  ========================================== */
+
+  function toggleProduct(product: MenuItem) {
+    if (saving) return
+
+    setDraft(previous => {
+      if (previous.offerType === 'general') {
+        return previous
+      }
+
+      const exists = previous.products.some(
+        item => item.productId === product.id
+      )
+
+      if (exists) {
+        return {
+          ...previous,
+          products: previous.products.filter(
+            item => item.productId !== product.id
+          ),
+        }
+      }
+
+      const selected = makeOfferProduct(product)
+
+      if (previous.offerType === 'single') {
+        return {
+          ...previous,
+          products: [selected],
+        }
+      }
+
+      return {
+        ...previous,
+        products: [
+          ...previous.products,
+          selected,
+        ],
+      }
+    })
+
+    setFormError('')
+  }
+
+  function changeQuantity(
+    productId: string,
+    quantity: number
+  ) {
+    if (saving) return
+
+    const nextQuantity = Math.max(
+      1,
+      Math.min(999, Math.trunc(quantity))
+    )
+
+    setDraft(previous => ({
+      ...previous,
+      products: previous.products.map(product =>
+        product.productId === productId
+          ? {
+              ...product,
+              quantity: nextQuantity,
+              lineTotal: roundMoney(
+                product.unitPrice * nextQuantity
+              ),
+            }
+          : product
+      ),
+    }))
+
+    setFormError('')
+  }
+
+  function removeProduct(productId: string) {
+    if (saving) return
+
+    setDraft(previous => ({
+      ...previous,
+      products: previous.products.filter(
+        product => product.productId !== productId
+      ),
+    }))
+
+    setFormError('')
+  }
+
+  /* ==========================================
+     DATE INPUTS
+  ========================================== */
+
   function updateStartDate(value: string) {
     const currentToday = getToday()
-
     setToday(currentToday)
 
     if (value && !isValidDate(value)) {
-      setFormError('Please select a valid start date.')
+      setFormError(
+        'Please select a valid start date.'
+      )
       return
     }
 
@@ -644,7 +967,6 @@ export default function Offers({
 
   function updateEndDate(value: string) {
     const currentToday = getToday()
-
     setToday(currentToday)
 
     const minimum =
@@ -654,7 +976,9 @@ export default function Offers({
         : currentToday
 
     if (value && !isValidDate(value)) {
-      setFormError('Please select a valid end date.')
+      setFormError(
+        'Please select a valid end date.'
+      )
       return
     }
 
@@ -665,12 +989,7 @@ export default function Offers({
       return
     }
 
-    setDraft(previous => ({
-      ...previous,
-      endDate: value,
-    }))
-
-    setFormError('')
+    updateDraft('endDate', value)
   }
 
   /* ==========================================
@@ -684,7 +1003,8 @@ export default function Offers({
 
     if (!file || saving) return
 
-    const requestId = ++imageRequestRef.current
+    const requestId =
+      ++imageRequestRef.current
 
     setImageLoading(true)
     setImageError('')
@@ -692,7 +1012,7 @@ export default function Offers({
     event.target.value = ''
 
     try {
-      const preparedImage =
+      const prepared =
         await prepareOfferImage(file)
 
       if (
@@ -701,17 +1021,17 @@ export default function Offers({
         return
       }
 
-      setOfferImage(preparedImage)
+      setOfferImage(prepared)
       setFormError('')
-    } catch (caughtError) {
+    } catch (caught) {
       if (
         requestId !== imageRequestRef.current
       ) {
         return
       }
 
-      const message = getErrorMessage(
-        caughtError,
+      const message = errorMessage(
+        caught,
         'Unable to process the image.'
       )
 
@@ -731,15 +1051,20 @@ export default function Offers({
   }
 
   async function removeOfferImage() {
-    if (!offerImage || saving || imageLoading) {
+    if (
+      !offerImage ||
+      saving ||
+      imageLoading
+    ) {
       return
     }
 
-    const confirmed = await AdminAlert.confirm(
-      'Remove Offer Image?',
-      'The promotional image will be removed from this offer when you save your changes.',
-      'Yes, Remove'
-    )
+    const confirmed =
+      await AdminAlert.confirm(
+        'Remove Offer Image?',
+        'The promotional image will be removed from this offer when you save your changes.',
+        'Yes, Remove'
+      )
 
     if (!confirmed) return
 
@@ -755,7 +1080,7 @@ export default function Offers({
   }
 
   /* ==========================================
-     VALIDATION ALERT
+     VALIDATION
   ========================================== */
 
   async function showValidationError(
@@ -763,7 +1088,6 @@ export default function Offers({
     message: string
   ) {
     setFormError(message)
-
     await AdminAlert.warning(title, message)
   }
 
@@ -790,10 +1114,6 @@ export default function Offers({
 
     const title = draft.title.trim()
 
-    const discountValue = Number(
-      draft.discountValue
-    )
-
     if (!title) {
       await showValidationError(
         'Offer Title Required',
@@ -802,28 +1122,125 @@ export default function Offers({
       return
     }
 
-    if (
-      draft.discountValue.trim() === '' ||
-      !Number.isFinite(discountValue) ||
-      discountValue <= 0 ||
-      (draft.discountType === 'percentage' &&
-        discountValue > 100)
-    ) {
-      await showValidationError(
-        'Invalid Discount',
-        draft.discountType === 'percentage'
-          ? 'Please enter a percentage greater than 0 and no more than 100.'
-          : 'Please enter a valid discount amount in LKR.'
+    const linked =
+      draft.offerType !== 'general'
+
+    if (linked) {
+      const count = draft.products.length
+
+      if (
+        (draft.offerType === 'single' &&
+          count !== 1) ||
+        (draft.offerType === 'combo' &&
+          count < 2)
+      ) {
+        await showValidationError(
+          'Select Products',
+          draft.offerType === 'single'
+            ? 'Please select exactly one product.'
+            : 'Please select at least two products for a combo offer.'
+        )
+        return
+      }
+
+      const invalidProduct = draft.products.find(
+        product =>
+          !Number.isSafeInteger(product.quantity) ||
+          product.quantity < 1 ||
+          !Number.isFinite(product.unitPrice) ||
+          product.unitPrice <= 0
       )
-      return
+
+      if (invalidProduct) {
+        await showValidationError(
+          'Invalid Product Price',
+          'Every selected product must have a valid price greater than zero and a valid quantity. Please update its price in Menu / Products.'
+        )
+        return
+      }
+
+      const unavailable = draft.products.find(
+        product => {
+          const catalogProduct = catalog.find(
+            item => item.id === product.productId
+          )
+
+          return (
+            !catalogProduct ||
+            !catalogProduct.available
+          )
+        }
+      )
+
+      if (unavailable) {
+        await showValidationError(
+          'Unavailable Product',
+          'One or more selected products are unavailable. Please update your selection.'
+        )
+        return
+      }
     }
 
-    /* ======================================
-       DATE VALIDATION
-    ====================================== */
+    const discount = Number(
+      draft.discountValue
+    )
+
+    if (
+      draft.pricingMode === 'discount' ||
+      !linked
+    ) {
+      if (
+        draft.discountValue.trim() === '' ||
+        !Number.isFinite(discount) ||
+        discount <= 0 ||
+        (draft.discountType === 'percentage' &&
+          discount > 100)
+      ) {
+        await showValidationError(
+          'Invalid Discount',
+          draft.discountType === 'percentage'
+            ? 'Enter a percentage greater than 0 and no more than 100.'
+            : 'Enter a valid discount amount in LKR.'
+        )
+        return
+      }
+
+      if (
+        linked &&
+        draft.discountType === 'fixed' &&
+        discount > pricing.originalTotal
+      ) {
+        await showValidationError(
+          'Discount Too High',
+          'Fixed discount cannot exceed the original product total.'
+        )
+        return
+      }
+    }
+
+    if (
+      linked &&
+      draft.pricingMode === 'custom'
+    ) {
+      const custom = Number(
+        draft.customFinalPrice
+      )
+
+      if (
+        draft.customFinalPrice.trim() === '' ||
+        !Number.isFinite(custom) ||
+        custom < 0 ||
+        custom >= pricing.originalTotal
+      ) {
+        await showValidationError(
+          'Invalid Offer Price',
+          'Enter a final offer price of zero or more, below the original product total.'
+        )
+        return
+      }
+    }
 
     const currentToday = getToday()
-
     setToday(currentToday)
 
     if (
@@ -848,22 +1265,22 @@ export default function Offers({
       return
     }
 
-    const startDateChanged =
+    const startChanged =
       !editing ||
       draft.startDate !== editing.startDate
 
-    const endDateChanged =
+    const endChanged =
       !editing ||
       draft.endDate !== editing.endDate
 
     if (
       draft.startDate &&
       draft.startDate < currentToday &&
-      startDateChanged
+      startChanged
     ) {
       await showValidationError(
         'Invalid Start Date',
-        'Start date cannot be earlier than today. Please select today or a future date.'
+        'Start date cannot be earlier than today.'
       )
       return
     }
@@ -871,7 +1288,7 @@ export default function Offers({
     if (
       draft.endDate &&
       draft.endDate < currentToday &&
-      endDateChanged
+      endChanged
     ) {
       await showValidationError(
         'Invalid End Date',
@@ -892,22 +1309,54 @@ export default function Offers({
       return
     }
 
-    /* ======================================
-       SAVE THROUGH EXISTING API STORE
-    ====================================== */
-
     const isEditing = Boolean(editing)
 
     const payload = {
       title,
       description: draft.description.trim(),
       code: draft.code.trim().toUpperCase(),
+
       discountType: draft.discountType,
-      discountValue,
+
+      discountValue:
+        linked &&
+        draft.pricingMode === 'custom'
+          ? draft.discountType === 'percentage'
+            ? pricing.savingsPercentage
+            : pricing.discountAmount
+          : discount,
+
       startDate: draft.startDate,
       endDate: draft.endDate,
       active: draft.active,
       image: offerImage,
+
+      offerType: draft.offerType,
+
+      products: linked
+        ? draft.products.map(product => ({
+            ...product,
+            lineTotal: roundMoney(
+              product.unitPrice * product.quantity
+            ),
+          }))
+        : [],
+
+      pricingMode: linked
+        ? draft.pricingMode
+        : ('discount' as const),
+
+      originalTotal: linked
+        ? pricing.originalTotal
+        : 0,
+
+      discountAmount: linked
+        ? pricing.discountAmount
+        : 0,
+
+      finalPrice: linked
+        ? pricing.finalPrice
+        : 0,
     }
 
     formLockRef.current = true
@@ -932,9 +1381,9 @@ export default function Offers({
       } else {
         await AdminAlert.offerAdded()
       }
-    } catch (caughtError) {
-      const message = getErrorMessage(
-        caughtError,
+    } catch (caught) {
+      const message = errorMessage(
+        caught,
         'Unable to save the offer.'
       )
 
@@ -956,22 +1405,25 @@ export default function Offers({
      ENABLE / DISABLE
   ========================================== */
 
-  async function toggleOffer(offer: AdminOffer) {
+  async function toggleOffer(
+    offer: AdminOffer
+  ) {
     if (busyId || saving) return
 
     const nextActive = !offer.active
 
-    const confirmed = await AdminAlert.confirm(
-      nextActive
-        ? 'Enable Promotion?'
-        : 'Disable Promotion?',
-      nextActive
-        ? `"${offer.title}" will be enabled. Its dates will still determine when it runs.`
-        : `"${offer.title}" will be disabled and no longer be active.`,
-      nextActive
-        ? 'Yes, Enable'
-        : 'Yes, Disable'
-    )
+    const confirmed =
+      await AdminAlert.confirm(
+        nextActive
+          ? 'Enable Promotion?'
+          : 'Disable Promotion?',
+        nextActive
+          ? `"${offer.title}" will be enabled. Its dates will still determine when it runs.`
+          : `"${offer.title}" will be disabled and no longer be active.`,
+        nextActive
+          ? 'Yes, Enable'
+          : 'Yes, Disable'
+      )
 
     if (!confirmed) return
 
@@ -989,9 +1441,9 @@ export default function Offers({
           : 'Promotion Disabled!',
         `"${offer.title}" has been updated successfully.`
       )
-    } catch (caughtError) {
-      const message = getErrorMessage(
-        caughtError,
+    } catch (caught) {
+      const message = errorMessage(
+        caught,
         'Unable to change offer status.'
       )
 
@@ -1007,10 +1459,12 @@ export default function Offers({
   }
 
   /* ==========================================
-     DELETE OFFER
+     DELETE
   ========================================== */
 
-  async function deleteOffer(offer: AdminOffer) {
+  async function deleteOffer(
+    offer: AdminOffer
+  ) {
     if (busyId || saving) return
 
     const confirmed =
@@ -1025,11 +1479,10 @@ export default function Offers({
 
     try {
       await deleteAdminOffer(offer.id)
-
       await AdminAlert.offerDeleted()
-    } catch (caughtError) {
-      const message = getErrorMessage(
-        caughtError,
+    } catch (caught) {
+      const message = errorMessage(
+        caught,
         'Unable to delete the offer.'
       )
 
@@ -1045,7 +1498,7 @@ export default function Offers({
   }
 
   /* ==========================================
-     PAGE UI
+     UI
   ========================================== */
 
   return (
@@ -1062,11 +1515,10 @@ export default function Offers({
         </button>
 
         <span>/</span>
-
         <strong>Offers & Promotions</strong>
       </div>
 
-      {/* PAGE HEADER */}
+      {/* HEADER */}
 
       <div className="za-products-page-head">
         <div>
@@ -1093,35 +1545,41 @@ export default function Offers({
         </button>
       </div>
 
-      {/* SUMMARY CARDS */}
+      {/* SUMMARY */}
 
       <div className="za-product-summary">
-        <div className="za-product-summary-card">
-          <span>Total Offers</span>
-          <strong>{stats.total}</strong>
-          <small>All promotions</small>
-        </div>
-
-        <div className="za-product-summary-card">
-          <span>Active Offers</span>
-          <strong>{stats.active}</strong>
-          <small>Currently running</small>
-        </div>
-
-        <div className="za-product-summary-card">
-          <span>Scheduled</span>
-          <strong>{stats.scheduled}</strong>
-          <small>Upcoming promotions</small>
-        </div>
-
-        <div className="za-product-summary-card">
-          <span>Expired</span>
-          <strong>{stats.expired}</strong>
-          <small>Past promotions</small>
-        </div>
+        {[
+          {
+            label: 'Total Offers',
+            value: stats.total,
+            hint: 'All promotions',
+          },
+          {
+            label: 'Active Offers',
+            value: stats.active,
+            hint: 'Currently running',
+          },
+          {
+            label: 'Scheduled',
+            value: stats.scheduled,
+            hint: 'Upcoming promotions',
+          },
+          {
+            label: 'Expired',
+            value: stats.expired,
+            hint: 'Past promotions',
+          },
+        ].map(item => (
+          <div
+            className="za-product-summary-card"
+            key={item.label}
+          >
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+            <small>{item.hint}</small>
+          </div>
+        ))}
       </div>
-
-      {/* PAGE ERROR */}
 
       {error && (
         <p
@@ -1143,8 +1601,8 @@ export default function Offers({
             </h2>
 
             <p>
-              Manage discount codes, availability
-              and offer dates.
+              Manage product offers, combo
+              pricing, discounts and offer dates.
             </p>
           </div>
 
@@ -1152,8 +1610,6 @@ export default function Offers({
             {filtered.length} offers
           </span>
         </div>
-
-        {/* FILTERS */}
 
         <div className="za-product-management-filters">
           <div className="za-filter-pills">
@@ -1191,14 +1647,12 @@ export default function Offers({
           </label>
         </div>
 
-        {/* TABLE */}
-
         <div className="za-table-wrap">
           <table className="za-table za-management-table">
             <thead>
               <tr>
                 <th>Promotion</th>
-                <th>Discount</th>
+                <th>Discount / Price</th>
                 <th>Promo Code</th>
                 <th>Validity</th>
                 <th>Status</th>
@@ -1208,7 +1662,8 @@ export default function Offers({
 
             <tbody>
               {filtered.map(offer => {
-                const status = getOfferStatus(offer)
+                const status =
+                  getOfferStatus(offer)
 
                 return (
                   <tr key={offer.id}>
@@ -1227,17 +1682,56 @@ export default function Offers({
                         </div>
 
                         <div>
-                          <strong>{offer.title}</strong>
+                          <strong>
+                            {offer.title}
+                          </strong>
+
                           <small>
                             {offer.description ||
                               'No description'}
                           </small>
+
+                          {offer.offerType &&
+                            offer.offerType !==
+                              'general' && (
+                              <small>
+                                {offer.offerType ===
+                                'combo'
+                                  ? 'Combo Offer'
+                                  : 'Single Product'}
+
+                                {' · '}
+
+                                {offer.products?.length ||
+                                  0}{' '}
+                                products
+                              </small>
+                            )}
                         </div>
                       </div>
                     </td>
 
                     <td className="za-management-price">
                       {formatDiscount(offer)}
+
+                      {offer.offerType !==
+                        'general' &&
+                        offer.finalPrice !==
+                          undefined &&
+                        offer.pricingMode !==
+                          'custom' && (
+                          <small
+                            style={{
+                              display: 'block',
+                              marginTop: 4,
+                            }}
+                          >
+                            Final:{' '}
+                            {money(
+                              offer.finalPrice
+                            )}
+                          </small>
+                        )}
                     </td>
 
                     <td>
@@ -1249,11 +1743,16 @@ export default function Offers({
                     <td>
                       <div className="za-offer-dates">
                         <span>
-                          {formatDate(offer.startDate)}
+                          {formatDate(
+                            offer.startDate
+                          )}
                         </span>
 
                         <small>
-                          to {formatDate(offer.endDate)}
+                          to{' '}
+                          {formatDate(
+                            offer.endDate
+                          )}
                         </small>
                       </div>
                     </td>
@@ -1280,7 +1779,9 @@ export default function Offers({
                           <EyeOff size={15} />
                         )}
 
-                        {status.charAt(0).toUpperCase() +
+                        {status
+                          .charAt(0)
+                          .toUpperCase() +
                           status.slice(1)}
                       </button>
                     </td>
@@ -1295,7 +1796,9 @@ export default function Offers({
                           disabled={
                             busyId !== null || saving
                           }
-                          onClick={() => openEdit(offer)}
+                          onClick={() =>
+                            openEdit(offer)
+                          }
                         >
                           <Pencil size={16} />
                         </button>
@@ -1325,9 +1828,7 @@ export default function Offers({
           {filtered.length === 0 && (
             <div className="za-management-empty">
               <Gift size={32} />
-
               <h3>No promotions found</h3>
-
               <p>
                 Create your first offer or adjust
                 the filters.
@@ -1345,7 +1846,8 @@ export default function Offers({
           role="presentation"
           onMouseDown={event => {
             if (
-              event.target === event.currentTarget
+              event.target ===
+              event.currentTarget
             ) {
               void closeForm()
             }
@@ -1356,9 +1858,11 @@ export default function Offers({
             role="dialog"
             aria-modal="true"
             aria-labelledby="za-offer-dialog-title"
+            style={{
+              maxWidth: 740,
+              width: 'calc(100% - 32px)',
+            }}
           >
-            {/* MODAL HEADER */}
-
             <div className="za-edit-dialog-head">
               <div>
                 <p className="za-kicker">
@@ -1385,10 +1889,10 @@ export default function Offers({
               </button>
             </div>
 
-            {/* OFFER FORM */}
-
-            <form onSubmit={saveOffer} noValidate>
-
+            <form
+              onSubmit={saveOffer}
+              noValidate
+            >
               {/* TITLE */}
 
               <label>
@@ -1397,7 +1901,7 @@ export default function Offers({
                 <input
                   required
                   maxLength={100}
-                  placeholder="e.g. Weekend Special"
+                  placeholder="e.g. Weekend Combo Special"
                   value={draft.title}
                   disabled={saving}
                   onChange={event =>
@@ -1408,6 +1912,499 @@ export default function Offers({
                   }
                 />
               </label>
+
+              {/* OFFER TYPE */}
+
+              <div
+                style={{
+                  marginTop: 18,
+                  marginBottom: 18,
+                }}
+              >
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: 10,
+                    fontWeight: 600,
+                  }}
+                >
+                  Offer Type *
+                </label>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'repeat(3, minmax(0, 1fr))',
+                    gap: 8,
+                  }}
+                >
+                  {([
+                    ['general', 'General'],
+                    ['single', 'Single Product'],
+                    ['combo', 'Combo Offer'],
+                  ] as const).map(
+                    ([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={saving}
+                        aria-pressed={
+                          draft.offerType === value
+                        }
+                        onClick={() =>
+                          changeOfferType(value)
+                        }
+                        style={{
+                          padding: '12px 6px',
+                          borderRadius: 10,
+                          border:
+                            draft.offerType === value
+                              ? '2px solid #a32722'
+                              : '1px solid #e8d9d2',
+                          background:
+                            draft.offerType === value
+                              ? '#fff2ef'
+                              : '#ffffff',
+                          color:
+                            draft.offerType === value
+                              ? '#a32722'
+                              : '#333333',
+                          fontWeight: 600,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <small
+                  style={{
+                    display: 'block',
+                    marginTop: 8,
+                    color: '#777',
+                  }}
+                >
+                  {draft.offerType === 'general'
+                    ? 'A standard promotion without linked products.'
+                    : draft.offerType === 'single'
+                      ? 'Select one menu product for this offer.'
+                      : 'Combine two or more menu products into one offer.'}
+                </small>
+              </div>
+
+              {/* PRODUCT SELECTOR */}
+
+              {draft.offerType !== 'general' && (
+                <section
+                  style={{
+                    marginBottom: 20,
+                    padding: 16,
+                    border:
+                      '1px solid #eadbd4',
+                    borderRadius: 14,
+                    background: '#fffaf7',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent:
+                        'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                      marginBottom: 14,
+                    }}
+                  >
+                    <strong>
+                      Select Menu Products *
+                    </strong>
+
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: '#a32722',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {draft.products.length}{' '}
+                      selected
+                    </span>
+                  </div>
+
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginBottom: 5,
+                      }}
+                    >
+                      <Search size={15} />
+                      Search Products
+                    </span>
+
+                    <input
+                      type="search"
+                      placeholder="Search food, drinks or snacks..."
+                      value={productSearch}
+                      disabled={saving}
+                      onChange={event =>
+                        setProductSearch(
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 7,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {([
+                      ['all', 'All'],
+                      ['food', 'Food'],
+                      ['drink', 'Drinks'],
+                      ['snacks', 'Snacks'],
+                    ] as const).map(
+                      ([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          disabled={saving}
+                          onClick={() =>
+                            setProductFilter(value)
+                          }
+                          style={{
+                            padding: '7px 13px',
+                            borderRadius: 20,
+                            border:
+                              '1px solid #e5d2c9',
+                            background:
+                              productFilter === value
+                                ? '#a32722'
+                                : '#ffffff',
+                            color:
+                              productFilter === value
+                                ? '#ffffff'
+                                : '#555555',
+                            fontSize: 12,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      )
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      maxHeight: 260,
+                      overflowY: 'auto',
+                      border:
+                        '1px solid #eee1da',
+                      borderRadius: 10,
+                      background: '#ffffff',
+                    }}
+                  >
+                    {filteredProducts.length === 0 ? (
+                      <p
+                        style={{
+                          padding: 18,
+                          color: '#777',
+                          textAlign: 'center',
+                        }}
+                      >
+                        No available products found.
+                      </p>
+                    ) : (
+                      filteredProducts.map(product => {
+                        const selected =
+                          selectedProductIds.has(
+                            product.id
+                          )
+
+                        return (
+                          <button
+                            key={product.id}
+                            type="button"
+                            disabled={saving}
+                            onClick={() =>
+                              toggleProduct(product)
+                            }
+                            aria-pressed={selected}
+                            style={{
+                              width: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                              padding: 10,
+                              textAlign: 'left',
+                              background: selected
+                                ? '#fff2ef'
+                                : '#ffffff',
+                              border: 'none',
+                              borderBottom:
+                                '1px solid #f0e5df',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: 46,
+                                height: 46,
+                                flexShrink: 0,
+                                borderRadius: 8,
+                                overflow: 'hidden',
+                                background: '#f4eae4',
+                              }}
+                            >
+                              {product.image && (
+                                <img
+                                  src={product.image}
+                                  alt=""
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                  }}
+                                />
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  display: 'block',
+                                  fontSize: 13,
+                                }}
+                              >
+                                {product.name}
+                              </strong>
+
+                              <small
+                                style={{
+                                  display: 'block',
+                                  color: '#888',
+                                }}
+                              >
+                                {product.kind} ·{' '}
+                                {product.category}
+                              </small>
+
+                              <small
+                                style={{
+                                  color: '#a32722',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {money(
+                                  productPrice(product)
+                                )}
+                              </small>
+                            </div>
+
+                            <span
+                              style={{
+                                width: 24,
+                                height: 24,
+                                borderRadius: 6,
+                                border:
+                                  '1px solid #a32722',
+                                background: selected
+                                  ? '#a32722'
+                                  : '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent:
+                                  'center',
+                                color: '#ffffff',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {selected && (
+                                <Check size={15} />
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+
+                  {/* SELECTED PRODUCTS */}
+
+                  {draft.products.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 18,
+                      }}
+                    >
+                      <strong
+                        style={{
+                          display: 'block',
+                          marginBottom: 10,
+                        }}
+                      >
+                        Selected Products
+                      </strong>
+
+                      {draft.products.map(product => (
+                        <div
+                          key={product.productId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '10px 0',
+                            borderBottom:
+                              '1px solid #eadbd4',
+                          }}
+                        >
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                            }}
+                          >
+                            <strong
+                              style={{
+                                display: 'block',
+                                fontSize: 13,
+                              }}
+                            >
+                              {product.name ||
+                                product.productId}
+                            </strong>
+
+                            <small
+                              style={{
+                                color: '#777',
+                              }}
+                            >
+                              {money(
+                                product.unitPrice
+                              )}{' '}
+                              each
+                            </small>
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 7,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              disabled={
+                                saving ||
+                                product.quantity <= 1
+                              }
+                              onClick={() =>
+                                changeQuantity(
+                                  product.productId,
+                                  product.quantity - 1
+                                )
+                              }
+                              aria-label="Decrease quantity"
+                              style={{
+                                padding: 5,
+                                border:
+                                  '1px solid #ddd',
+                                borderRadius: 6,
+                                background: '#fff',
+                              }}
+                            >
+                              <Minus size={14} />
+                            </button>
+
+                            <strong>
+                              {product.quantity}
+                            </strong>
+
+                            <button
+                              type="button"
+                              disabled={
+                                saving ||
+                                product.quantity >= 999
+                              }
+                              onClick={() =>
+                                changeQuantity(
+                                  product.productId,
+                                  product.quantity + 1
+                                )
+                              }
+                              aria-label="Increase quantity"
+                              style={{
+                                padding: 5,
+                                border:
+                                  '1px solid #ddd',
+                                borderRadius: 6,
+                                background: '#fff',
+                              }}
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+
+                          <strong
+                            style={{
+                              fontSize: 12,
+                              minWidth: 90,
+                              textAlign: 'right',
+                            }}
+                          >
+                            {money(
+                              product.unitPrice *
+                                product.quantity
+                            )}
+                          </strong>
+
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() =>
+                              removeProduct(
+                                product.productId
+                              )
+                            }
+                            aria-label="Remove product"
+                            style={{
+                              border: 'none',
+                              background: 'none',
+                              color: '#a32722',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <X size={17} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {/* DESCRIPTION */}
 
@@ -1428,7 +2425,7 @@ export default function Offers({
                 />
               </label>
 
-              {/* IMAGE UPLOAD */}
+              {/* IMAGE */}
 
               <div className="za-offer-image-section">
                 <label className="za-offer-image-label">
@@ -1478,7 +2475,9 @@ export default function Offers({
                   <div className="za-offer-image-actions">
                     <button
                       type="button"
-                      disabled={imageLoading || saving}
+                      disabled={
+                        imageLoading || saving
+                      }
                       onClick={() =>
                         fileInputRef.current?.click()
                       }
@@ -1489,7 +2488,9 @@ export default function Offers({
 
                     <button
                       type="button"
-                      disabled={imageLoading || saving}
+                      disabled={
+                        imageLoading || saving
+                      }
                       onClick={() => {
                         void removeOfferImage()
                       }}
@@ -1510,63 +2511,265 @@ export default function Offers({
                 )}
               </div>
 
+              {/* PRICING MODE */}
+
+              {draft.offerType !== 'general' && (
+                <div
+                  style={{
+                    marginTop: 20,
+                    marginBottom: 16,
+                  }}
+                >
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: 10,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Offer Pricing Method
+                  </label>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                    }}
+                  >
+                    {([
+                      ['discount', 'Apply Discount'],
+                      ['custom', 'Custom Offer Price'],
+                    ] as const).map(
+                      ([value, label]) => (
+                        <label
+                          key={value}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 7,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="offer-pricing-mode"
+                            checked={
+                              draft.pricingMode ===
+                              value
+                            }
+                            disabled={saving}
+                            onChange={() =>
+                              updateDraft(
+                                'pricingMode',
+                                value
+                              )
+                            }
+                          />
+
+                          {label}
+                        </label>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* DISCOUNT */}
 
-              <div className="za-offer-form-grid">
-                <label>
-                  Discount Type
+              {(draft.offerType === 'general' ||
+                draft.pricingMode ===
+                  'discount') && (
+                <div className="za-offer-form-grid">
+                  <label>
+                    Discount Type
 
-                  <select
-                    value={draft.discountType}
-                    disabled={saving}
-                    onChange={event =>
-                      updateDraft(
-                        'discountType',
-                        event.target.value as
-                          | 'percentage'
-                          | 'fixed'
-                      )
-                    }
+                    <select
+                      value={draft.discountType}
+                      disabled={saving}
+                      onChange={event =>
+                        updateDraft(
+                          'discountType',
+                          event.target.value as
+                            OfferDiscountType
+                        )
+                      }
+                    >
+                      <option value="percentage">
+                        Percentage (%)
+                      </option>
+
+                      <option value="fixed">
+                        Fixed Amount (LKR)
+                      </option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Discount Value *
+
+                    <input
+                      type="number"
+                      required
+                      min="0.01"
+                      max={
+                        draft.discountType ===
+                        'percentage'
+                          ? 100
+                          : undefined
+                      }
+                      step="0.01"
+                      placeholder={
+                        draft.discountType ===
+                        'percentage'
+                          ? 'e.g. 15'
+                          : 'e.g. 500'
+                      }
+                      value={draft.discountValue}
+                      disabled={saving}
+                      onChange={event =>
+                        updateDraft(
+                          'discountValue',
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {/* CUSTOM PRICE */}
+
+              {draft.offerType !== 'general' &&
+                draft.pricingMode === 'custom' && (
+                  <label>
+                    Final Offer Price (LKR) *
+
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Enter final selling price"
+                      value={
+                        draft.customFinalPrice
+                      }
+                      disabled={saving}
+                      onChange={event =>
+                        updateDraft(
+                          'customFinalPrice',
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                )}
+
+              {/* PRICE SUMMARY */}
+
+              {draft.offerType !== 'general' &&
+                draft.products.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: 20,
+                      marginBottom: 20,
+                      padding: 18,
+                      borderRadius: 14,
+                      border:
+                        '1px solid #ead7ce',
+                      background: '#fff7f2',
+                    }}
                   >
-                    <option value="percentage">
-                      Percentage (%)
-                    </option>
+                    <strong
+                      style={{
+                        display: 'block',
+                        marginBottom: 14,
+                        fontSize: 15,
+                      }}
+                    >
+                      Offer Price Summary
+                    </strong>
 
-                    <option value="fixed">
-                      Fixed Amount (LKR)
-                    </option>
-                  </select>
-                </label>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent:
+                          'space-between',
+                        marginBottom: 10,
+                      }}
+                    >
+                      <span>Original Total</span>
 
-                <label>
-                  Discount Value *
+                      <strong>
+                        {money(
+                          pricing.originalTotal
+                        )}
+                      </strong>
+                    </div>
 
-                  <input
-                    type="number"
-                    required
-                    min="0.01"
-                    max={
-                      draft.discountType === 'percentage'
-                        ? 100
-                        : undefined
-                    }
-                    step="0.01"
-                    placeholder={
-                      draft.discountType === 'percentage'
-                        ? 'e.g. 15'
-                        : 'e.g. 500'
-                    }
-                    value={draft.discountValue}
-                    disabled={saving}
-                    onChange={event =>
-                      updateDraft(
-                        'discountValue',
-                        event.target.value
-                      )
-                    }
-                  />
-                </label>
-              </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent:
+                          'space-between',
+                        marginBottom: 10,
+                      }}
+                    >
+                      <span>Discount / Savings</span>
+
+                      <strong
+                        style={{
+                          color: '#a32722',
+                        }}
+                      >
+                        -{money(
+                          pricing.discountAmount
+                        )}
+                      </strong>
+                    </div>
+
+                    <div
+                      style={{
+                        borderTop:
+                          '1px solid #ead7ce',
+                        paddingTop: 14,
+                        marginTop: 12,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent:
+                          'space-between',
+                        gap: 10,
+                      }}
+                    >
+                      <strong>
+                        Final Offer Price
+                      </strong>
+
+                      <strong
+                        style={{
+                          fontSize: 22,
+                          color: '#a32722',
+                        }}
+                      >
+                        {money(
+                          pricing.finalPrice
+                        )}
+                      </strong>
+                    </div>
+
+                    <small
+                      style={{
+                        display: 'block',
+                        marginTop: 8,
+                        color: '#777',
+                      }}
+                    >
+                      Customer saves{' '}
+                      {pricing.savingsPercentage}%
+                      compared with the original
+                      product total.
+                    </small>
+                  </div>
+                )}
 
               {/* PROMO CODE */}
 
@@ -1587,10 +2790,7 @@ export default function Offers({
                 />
               </label>
 
-              {/* ======================================
-                  DATE SELECTION
-                  NO PAST DATES FOR NEW OFFERS
-              ====================================== */}
+              {/* DATES */}
 
               <div className="za-offer-form-grid">
                 <label>
@@ -1610,8 +2810,9 @@ export default function Offers({
 
                   {hasHistoricalStartDate && (
                     <small>
-                      Existing start date is in the past.
-                      Choose today or later to change it.
+                      Existing start date is in
+                      the past. Choose today or
+                      later to change it.
                     </small>
                   )}
                 </label>
@@ -1633,14 +2834,15 @@ export default function Offers({
 
                   {hasHistoricalEndDate && (
                     <small>
-                      Existing end date is in the past.
-                      Choose today or later to change it.
+                      Existing end date is in
+                      the past. Choose today or
+                      later to change it.
                     </small>
                   )}
                 </label>
               </div>
 
-              {/* ENABLE PROMOTION */}
+              {/* ACTIVE */}
 
               <label className="za-edit-checkbox">
                 <input
@@ -1658,7 +2860,7 @@ export default function Offers({
                 Enable Promotion
               </label>
 
-              {/* FORM ERROR */}
+              {/* ERROR */}
 
               {formError && (
                 <p
@@ -1669,7 +2871,7 @@ export default function Offers({
                 </p>
               )}
 
-              {/* FORM ACTIONS */}
+              {/* ACTIONS */}
 
               <div className="za-edit-dialog-actions">
                 <button
@@ -1687,7 +2889,9 @@ export default function Offers({
                 <button
                   type="submit"
                   className="za-primary"
-                  disabled={imageLoading || saving}
+                  disabled={
+                    imageLoading || saving
+                  }
                 >
                   <Check size={17} />
 

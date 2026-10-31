@@ -14,6 +14,7 @@ import type {
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Eye,
   ImagePlus,
   Plus,
@@ -37,6 +38,10 @@ import {
   addMenuProduct,
   prepareStoredMenuImage,
   deleteStoredMenuImage,
+  readMenuCatalog,
+  loadMenuCatalog,
+  subscribeMenuCatalog,
+  getMenuCategoriesFromProducts,
 } from '../../data/menuStore'
 
 import AdminAlert from '../utils/sweetAlert'
@@ -85,120 +90,78 @@ const INITIAL_DRAFT: ProductDraft = {
   isNew: false,
 }
 
-const CATEGORY_STORAGE_KEY =
-  'zen-admin-categories-v1'
-
-const DEFAULT_CATEGORIES: Record<
-  MenuKind,
-  string[]
-> = {
-  food: [
-    'Signature',
-    'Rice Specials',
-    'Wraps',
-    'Street Grill',
-    'Burgers',
-    'Snacks',
-    'Sandwiches',
-    'Desserts',
-    'Breakfast',
-  ],
-
-  drink: [
-    'Milkshake',
-    'Berry Special',
-    'Chocolate',
-    'Mojito',
-    'Iced Coffee',
-    'Hot Drinks',
-    'Iced Drinks',
-    'Smoothies',
-    'Fresh Juices',
-    'Tea',
-  ],
-}
-
 /* ==========================================
-   CATEGORY STORAGE
-========================================== */
-
-function readCategories(): Record<
-  MenuKind,
-  string[]
-> {
-  try {
-    const raw = localStorage.getItem(
-      CATEGORY_STORAGE_KEY
-    )
-
-    if (!raw) {
-      return {
-        food: [...DEFAULT_CATEGORIES.food],
-        drink: [...DEFAULT_CATEGORIES.drink],
-      }
-    }
-
-    const parsed: unknown = JSON.parse(raw)
-
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      return {
-        food: [...DEFAULT_CATEGORIES.food],
-        drink: [...DEFAULT_CATEGORIES.drink],
-      }
-    }
-
-    const saved = parsed as Partial<
-      Record<MenuKind, string[]>
-    >
-
-    return {
-      food: [
-        ...new Set([
-          ...DEFAULT_CATEGORIES.food,
-          ...(Array.isArray(saved.food)
-            ? saved.food.filter(
-                (value): value is string =>
-                  typeof value === 'string'
-              )
-            : []),
-        ]),
-      ],
-
-      drink: [
-        ...new Set([
-          ...DEFAULT_CATEGORIES.drink,
-          ...(Array.isArray(saved.drink)
-            ? saved.drink.filter(
-                (value): value is string =>
-                  typeof value === 'string'
-              )
-            : []),
-        ]),
-      ],
-    }
-  } catch {
-    return {
-      food: [...DEFAULT_CATEGORIES.food],
-      drink: [...DEFAULT_CATEGORIES.drink],
-    }
-  }
-}
-
-/* ==========================================
-   ERROR HELPER
+   HELPERS
 ========================================== */
 
 function getErrorMessage(
   error: unknown,
-  fallback: string
-) {
-  return error instanceof Error
+  fallback: string,
+): string {
+  return error instanceof Error &&
+    error.message.trim()
     ? error.message
     : fallback
+}
+
+function normalizeCategory(
+  value: string,
+): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function uniqueCategories(
+  values: string[],
+): string[] {
+  const categories = new Map<
+    string,
+    string
+  >()
+
+  for (const value of values) {
+    const normalized =
+      normalizeCategory(value)
+
+    if (!normalized) continue
+
+    const key =
+      normalized.toLocaleLowerCase()
+
+    if (!categories.has(key)) {
+      categories.set(key, normalized)
+    }
+  }
+
+  return [...categories.values()].sort(
+    (a, b) =>
+      a.localeCompare(b, undefined, {
+        sensitivity: 'base',
+      }),
+  )
+}
+
+function getKindLabel(
+  kind: MenuKind,
+): string {
+  switch (kind) {
+    case 'food':
+      return 'Food'
+    case 'drink':
+      return 'Drink'
+    case 'snacks':
+      return 'Snacks'
+    default:
+      return 'Product'
+  }
+}
+
+function isFoodOrSnacks(
+  kind: MenuKind,
+): boolean {
+  return (
+    kind === 'food' ||
+    kind === 'snacks'
+  )
 }
 
 /* ==========================================
@@ -210,15 +173,16 @@ function Toggle({
   onChange,
   label,
   description,
+  disabled = false,
 }: {
   checked: boolean
   onChange: (value: boolean) => void
   label: string
   description: string
+  disabled?: boolean
 }) {
   return (
     <label className="za-add-toggle-row">
-
       <span>
         <strong>{label}</strong>
         <small>{description}</small>
@@ -228,6 +192,7 @@ function Toggle({
         type="checkbox"
         className="za-add-switch-input"
         checked={checked}
+        disabled={disabled}
         onChange={event =>
           onChange(event.target.checked)
         }
@@ -237,7 +202,6 @@ function Toggle({
         className="za-add-switch"
         aria-hidden="true"
       />
-
     </label>
   )
 }
@@ -254,11 +218,29 @@ export default function AddProduct({
       ...INITIAL_DRAFT,
     })
 
-  const [categories, setCategories] =
-    useState(readCategories)
+  /* ==========================================
+     LIVE PRODUCT CATALOG
+  ========================================== */
 
-  const [newCategory, setNewCategory] =
-    useState('')
+  const [catalog, setCatalog] =
+    useState<MenuItem[]>(() =>
+      readMenuCatalog(),
+    )
+
+  const [
+    loadingCategories,
+    setLoadingCategories,
+  ] = useState(true)
+
+  const [
+    categoryLoadError,
+    setCategoryLoadError,
+  ] = useState('')
+
+  const [
+    newCategory,
+    setNewCategory,
+  ] = useState('')
 
   const [
     addingCategory,
@@ -266,39 +248,105 @@ export default function AddProduct({
   ] = useState(false)
 
   const [
+    categoryError,
+    setCategoryError,
+  ] = useState('')
+
+  /* ==========================================
+     IMAGE STATE
+  ========================================== */
+
+  const [
     selectedFile,
     setSelectedFile,
   ] = useState<File | null>(null)
 
-  const [previewUrl, setPreviewUrl] =
-    useState('')
+  const [
+    previewUrl,
+    setPreviewUrl,
+  ] = useState('')
 
   const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] =
+    useState(false)
 
   const fileInputRef =
+    useRef<HTMLInputElement>(null)
+
+  const categoryInputRef =
     useRef<HTMLInputElement>(null)
 
   const previewUrlRef = useRef('')
 
   /* ==========================================
-     CLEAN UP IMAGE OBJECT URL
+     LOAD CATEGORIES FROM DATABASE
+
+     Food, Drink and Snacks each use
+     their own existing categories.
+  ========================================== */
+
+  useEffect(() => {
+    let active = true
+
+    setLoadingCategories(true)
+    setCategoryLoadError('')
+
+    const unsubscribe =
+      subscribeMenuCatalog(() => {
+        if (active) {
+          setCatalog(readMenuCatalog())
+        }
+      })
+
+    loadMenuCatalog({ all: true })
+      .then(items => {
+        if (!active) return
+
+        setCatalog(items)
+        setCategoryLoadError('')
+      })
+      .catch(caughtError => {
+        if (!active) return
+
+        setCategoryLoadError(
+          getErrorMessage(
+            caughtError,
+            'Unable to load categories from the database.',
+          ),
+        )
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingCategories(false)
+        }
+      })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
+  /* ==========================================
+     IMAGE CLEANUP
   ========================================== */
 
   useEffect(() => {
     return () => {
       if (previewUrlRef.current) {
         URL.revokeObjectURL(
-          previewUrlRef.current
+          previewUrlRef.current,
         )
       }
     }
   }, [])
 
-  function setImagePreview(url: string) {
+  function setImagePreview(
+    url: string,
+  ) {
     if (previewUrlRef.current) {
       URL.revokeObjectURL(
-        previewUrlRef.current
+        previewUrlRef.current,
       )
     }
 
@@ -307,37 +355,72 @@ export default function AddProduct({
   }
 
   /* ==========================================
-     AVAILABLE CATEGORIES
+     CATEGORY DATA
+
+     Shared helper from menuStore.ts.
+     No hardcoded categories.
   ========================================== */
 
-  const availableCategories = useMemo(
-    () => categories[draft.kind],
-    [categories, draft.kind]
+  const categoriesByKind = useMemo(
+    () =>
+      getMenuCategoriesFromProducts(
+        catalog,
+      ),
+    [catalog],
   )
+
+  const availableCategories =
+    useMemo(() => {
+      const existing =
+        categoriesByKind[draft.kind] || []
+
+      return uniqueCategories([
+        ...existing,
+        draft.category,
+      ])
+    }, [
+      categoriesByKind,
+      draft.kind,
+      draft.category,
+    ])
+
+  /* ==========================================
+     FOCUS NEW CATEGORY INPUT
+  ========================================== */
+
+  useEffect(() => {
+    if (addingCategory) {
+      categoryInputRef.current?.focus()
+    }
+  }, [addingCategory])
 
   /* ==========================================
      UNSAVED CHANGES
   ========================================== */
 
-  const hasUnsavedChanges = useMemo(() => {
-    const draftChanged =
-      JSON.stringify(draft) !==
-      JSON.stringify(INITIAL_DRAFT)
-
-    return (
-      draftChanged ||
-      selectedFile !== null ||
-      newCategory.trim() !== ''
-    )
-  }, [draft, selectedFile, newCategory])
+  const hasUnsavedChanges =
+    useMemo(() => {
+      return (
+        JSON.stringify(draft) !==
+          JSON.stringify(INITIAL_DRAFT) ||
+        selectedFile !== null ||
+        newCategory.trim() !== ''
+      )
+    }, [
+      draft,
+      selectedFile,
+      newCategory,
+    ])
 
   /* ==========================================
      UPDATE FIELD
   ========================================== */
 
-  function update<K extends keyof ProductDraft>(
+  function update<
+    K extends keyof ProductDraft
+  >(
     key: K,
-    value: ProductDraft[K]
+    value: ProductDraft[K],
   ) {
     setDraft(previous => ({
       ...previous,
@@ -349,10 +432,21 @@ export default function AddProduct({
 
   /* ==========================================
      CHANGE PRODUCT TYPE
+
+     Food -> Zen Kitchen
+     Drink -> Drinks menu
+     Snacks -> Zen Kitchen snacks
   ========================================== */
 
-  function changeKind(kind: MenuKind) {
-    if (saving) return
+  function changeKind(
+    kind: MenuKind,
+  ) {
+    if (
+      saving ||
+      kind === draft.kind
+    ) {
+      return
+    }
 
     setDraft(previous => ({
       ...previous,
@@ -361,90 +455,106 @@ export default function AddProduct({
       spiceLevel: 'none',
     }))
 
+    setNewCategory('')
+    setAddingCategory(false)
+    setCategoryError('')
     setError('')
   }
 
   /* ==========================================
+     NEW CATEGORY CONTROLS
+  ========================================== */
+
+  function openNewCategory() {
+    if (saving) return
+
+    setAddingCategory(true)
+    setNewCategory('')
+    setCategoryError('')
+    setError('')
+  }
+
+  function cancelNewCategory() {
+    if (saving) return
+
+    setAddingCategory(false)
+    setNewCategory('')
+    setCategoryError('')
+  }
+
+  /* ==========================================
      ADD NEW CATEGORY
+
+     The category is persisted when
+     its product is saved to the API.
   ========================================== */
 
   async function addCategory() {
     if (saving) return
 
-    const name = newCategory.trim()
+    const name =
+      normalizeCategory(newCategory)
 
     if (!name) {
       const message =
         'Please enter a category name.'
 
-      setError(message)
+      setCategoryError(message)
 
       await AdminAlert.warning(
         'Category Name Required',
-        message
+        message,
+      )
+
+      return
+    }
+
+    if (name.length > 80) {
+      const message =
+        'Category name must be 80 characters or fewer.'
+
+      setCategoryError(message)
+
+      await AdminAlert.warning(
+        'Category Name Too Long',
+        message,
       )
 
       return
     }
 
     const existing =
-      categories[draft.kind]
-
-    if (
-      existing.some(
+      availableCategories.find(
         category =>
-          category.toLowerCase() ===
-          name.toLowerCase()
+          category.toLocaleLowerCase() ===
+          name.toLocaleLowerCase(),
       )
-    ) {
-      const message =
-        'This category already exists.'
 
-      setError(message)
+    if (existing) {
+      update('category', existing)
+
+      setNewCategory('')
+      setAddingCategory(false)
+      setCategoryError('')
 
       await AdminAlert.warning(
-        'Duplicate Category',
-        message
+        'Category Already Exists',
+        `"${existing}" already exists and has been selected.`,
       )
 
       return
     }
 
-    const next = {
-      ...categories,
-      [draft.kind]: [...existing, name],
-    }
+    update('category', name)
 
-    try {
-      localStorage.setItem(
-        CATEGORY_STORAGE_KEY,
-        JSON.stringify(next)
-      )
+    setNewCategory('')
+    setAddingCategory(false)
+    setCategoryError('')
 
-      setCategories(next)
-
-      update('category', name)
-
-      setNewCategory('')
-      setAddingCategory(false)
-
-      await AdminAlert.success(
-        'Category Added!',
-        `"${name}" has been added successfully.`
-      )
-    } catch (caughtError) {
-      const message = getErrorMessage(
-        caughtError,
-        'Unable to save the new category.'
-      )
-
-      setError(message)
-
-      await AdminAlert.error(
-        'Category Save Failed',
-        message
-      )
-    }
+    await AdminAlert.success(
+      'Category Selected!',
+      `"${name}" is ready to use. Save the product to add this category to your menu.`,
+    )
   }
 
   /* ==========================================
@@ -452,9 +562,10 @@ export default function AddProduct({
   ========================================== */
 
   async function handleImage(
-    event: ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>,
   ) {
-    const file = event.target.files?.[0]
+    const file =
+      event.target.files?.[0]
 
     if (!file) return
 
@@ -466,7 +577,9 @@ export default function AddProduct({
       'image/webp',
     ]
 
-    if (!allowedTypes.includes(file.type)) {
+    if (
+      !allowedTypes.includes(file.type)
+    ) {
       const message =
         'Please select a JPG, PNG, or WebP image.'
 
@@ -474,13 +587,30 @@ export default function AddProduct({
 
       await AdminAlert.warning(
         'Invalid Image Format',
-        message
+        message,
       )
 
       return
     }
 
-    if (file.size > 12 * 1024 * 1024) {
+    if (file.size === 0) {
+      const message =
+        'The selected image is empty.'
+
+      setError(message)
+
+      await AdminAlert.warning(
+        'Invalid Image',
+        message,
+      )
+
+      return
+    }
+
+    if (
+      file.size >
+      12 * 1024 * 1024
+    ) {
       const message =
         'Image must be smaller than 12 MB.'
 
@@ -488,7 +618,7 @@ export default function AddProduct({
 
       await AdminAlert.warning(
         'Image Too Large',
-        message
+        message,
       )
 
       return
@@ -509,7 +639,7 @@ export default function AddProduct({
 
       await AdminAlert.error(
         'Image Upload Error',
-        message
+        message,
       )
     }
   }
@@ -528,13 +658,18 @@ export default function AddProduct({
   }
 
   async function removeImage() {
-    if (!selectedFile || saving) return
+    if (
+      !selectedFile ||
+      saving
+    ) {
+      return
+    }
 
     const confirmed =
       await AdminAlert.confirm(
         'Remove Product Image?',
         'The selected image will be removed from this product.',
-        'Yes, Remove'
+        'Yes, Remove',
       )
 
     if (!confirmed) return
@@ -543,7 +678,7 @@ export default function AddProduct({
 
     await AdminAlert.success(
       'Image Removed',
-      'The product image has been removed.'
+      'The product image has been removed.',
     )
   }
 
@@ -559,7 +694,7 @@ export default function AddProduct({
         await AdminAlert.confirm(
           'Discard New Product?',
           'You have unsaved product information. Leaving this page will discard your changes.',
-          'Yes, Discard'
+          'Yes, Discard',
         )
 
       if (!confirmed) return
@@ -573,16 +708,24 @@ export default function AddProduct({
   ========================================== */
 
   async function handleSave(
-    event: FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault()
 
     if (saving) return
 
     const name = draft.name.trim()
-    const category = draft.category.trim()
-    const priceText = draft.price.trim()
-    const price = Number(priceText)
+
+    const category =
+      normalizeCategory(
+        draft.category,
+      )
+
+    const priceText =
+      draft.price.trim()
+
+    const price =
+      Number(priceText)
 
     if (!name) {
       const message =
@@ -592,7 +735,7 @@ export default function AddProduct({
 
       await AdminAlert.warning(
         'Product Name Required',
-        message
+        message,
       )
 
       return
@@ -606,7 +749,21 @@ export default function AddProduct({
 
       await AdminAlert.warning(
         'Category Required',
-        message
+        message,
+      )
+
+      return
+    }
+
+    if (addingCategory) {
+      const message =
+        'Please finish adding or cancel the new category before saving.'
+
+      setError(message)
+
+      await AdminAlert.warning(
+        'Finish Category Selection',
+        message,
       )
 
       return
@@ -624,7 +781,7 @@ export default function AddProduct({
 
       await AdminAlert.warning(
         'Invalid Product Price',
-        message
+        message,
       )
 
       return
@@ -637,16 +794,16 @@ export default function AddProduct({
     let productCreated = false
 
     try {
-      /* PREPARE IMAGE */
+      /* PREPARE PRODUCT IMAGE */
 
       if (selectedFile) {
         savedImage =
           await prepareStoredMenuImage(
-            selectedFile
+            selectedFile,
           )
       }
 
-      /* CREATE PRODUCT */
+      /* PRODUCT DATA */
 
       const product: MenuItem = {
         id: crypto.randomUUID(),
@@ -673,16 +830,25 @@ export default function AddProduct({
         accent:
           draft.kind === 'drink'
             ? '#4a9a68'
-            : '#a32722',
+            : draft.kind === 'snacks'
+              ? '#c47729'
+              : '#a32722',
 
-        available: draft.available,
-        featured: draft.featured,
-        isNew: draft.isNew,
+        available:
+          draft.available,
+
+        featured:
+          draft.featured,
+
+        isNew:
+          draft.isNew,
 
         createdAt:
           new Date().toISOString(),
 
-        ...(draft.kind === 'food'
+        ...(isFoodOrSnacks(
+          draft.kind,
+        )
           ? {
               dietaryType:
                 draft.dietaryType,
@@ -696,19 +862,25 @@ export default function AddProduct({
             }),
       }
 
-      /* SAVE TO EXISTING MENU STORE */
+      /* SAVE TO DATABASE API */
 
       await addMenuProduct(product)
+
       productCreated = true
 
       /* RESET FORM */
 
       clearImage()
-      setDraft({ ...INITIAL_DRAFT })
+
+      setDraft({
+        ...INITIAL_DRAFT,
+      })
+
       setNewCategory('')
       setAddingCategory(false)
+      setCategoryError('')
 
-      /* SUCCESS SWEET ALERT */
+      /* SUCCESS ALERT */
 
       await AdminAlert.productAdded()
 
@@ -716,36 +888,30 @@ export default function AddProduct({
 
       onNavigate('products')
     } catch (caughtError) {
-      /*
-       * If image storage succeeded but
-       * product creation failed, clean
-       * up the stored image.
-       *
-       * Never delete an image after the
-       * product has been successfully
-       * created.
-       */
-
-      if (savedImage && !productCreated) {
+      if (
+        savedImage &&
+        !productCreated
+      ) {
         try {
           await deleteStoredMenuImage(
-            savedImage
+            savedImage,
           )
         } catch {
-          // Preserve the original error.
+          // Preserve original error.
         }
       }
 
-      const message = getErrorMessage(
-        caughtError,
-        'Unable to save the product.'
-      )
+      const message =
+        getErrorMessage(
+          caughtError,
+          'Unable to save the product.',
+        )
 
       setError(message)
 
       await AdminAlert.error(
         'Product Creation Failed',
-        message
+        message,
       )
     } finally {
       setSaving(false)
@@ -762,7 +928,6 @@ export default function AddProduct({
       {/* BREADCRUMB */}
 
       <div className="za-products-breadcrumb">
-
         <button
           type="button"
           disabled={saving}
@@ -778,13 +943,11 @@ export default function AddProduct({
         <strong>
           Add New Product
         </strong>
-
       </div>
 
       {/* PAGE HEADER */}
 
       <div className="za-add-page-head">
-
         <div>
           <p className="za-kicker">
             MENU MANAGEMENT
@@ -795,8 +958,8 @@ export default function AddProduct({
           </h1>
 
           <p>
-            Create a food or drink item
-            for your Zen Café menu.
+            Create a food, drink or snacks
+            item for your Zen Café menu.
           </p>
         </div>
 
@@ -811,7 +974,6 @@ export default function AddProduct({
           <ArrowLeft size={17} />
           Back to Products
         </button>
-
       </div>
 
       {/* MAIN FORM */}
@@ -820,7 +982,6 @@ export default function AddProduct({
         onSubmit={handleSave}
         noValidate
       >
-
         <div className="za-add-product-grid">
 
           {/* LEFT COLUMN */}
@@ -832,7 +993,6 @@ export default function AddProduct({
             <section className="za-add-card">
 
               <div className="za-add-card-heading">
-
                 <UtensilsCrossed size={22} />
 
                 <div>
@@ -845,13 +1005,11 @@ export default function AddProduct({
                     your menu item.
                   </p>
                 </div>
-
               </div>
 
               {/* PRODUCT TYPE */}
 
               <div className="za-add-field">
-
                 <label>
                   Product Type *
                 </label>
@@ -866,6 +1024,9 @@ export default function AddProduct({
                         : ''
                     }
                     disabled={saving}
+                    aria-pressed={
+                      draft.kind === 'food'
+                    }
                     onClick={() =>
                       changeKind('food')
                     }
@@ -881,6 +1042,9 @@ export default function AddProduct({
                         : ''
                     }
                     disabled={saving}
+                    aria-pressed={
+                      draft.kind === 'drink'
+                    }
                     onClick={() =>
                       changeKind('drink')
                     }
@@ -888,14 +1052,46 @@ export default function AddProduct({
                     Drink
                   </button>
 
+                  <button
+                    type="button"
+                    className={
+                      draft.kind === 'snacks'
+                        ? 'active'
+                        : ''
+                    }
+                    disabled={saving}
+                    aria-pressed={
+                      draft.kind === 'snacks'
+                    }
+                    onClick={() =>
+                      changeKind('snacks')
+                    }
+                  >
+                    Snacks
+                  </button>
+
                 </div>
 
+                {draft.kind === 'snacks' && (
+                  <small
+                    style={{
+                      display: 'block',
+                      marginTop: '8px',
+                      color: '#8d776c',
+                    }}
+                  >
+                    Snacks are managed
+                    separately from Food and
+                    Drinks and are intended
+                    for the Zen Kitchen
+                    snacks section.
+                  </small>
+                )}
               </div>
 
               {/* PRODUCT NAME */}
 
               <div className="za-add-field">
-
                 <label htmlFor="za-add-name">
                   Product Name *
                 </label>
@@ -904,75 +1100,147 @@ export default function AddProduct({
                   id="za-add-name"
                   required
                   maxLength={100}
-                  placeholder="e.g. Chicken Biryani"
+                  placeholder={
+                    draft.kind === 'snacks'
+                      ? 'e.g. Chicken Samosa'
+                      : draft.kind === 'drink'
+                        ? 'e.g. Iced Coffee'
+                        : 'e.g. Chicken Biryani'
+                  }
                   value={draft.name}
                   disabled={saving}
                   onChange={event =>
                     update(
                       'name',
-                      event.target.value
+                      event.target.value,
                     )
                   }
                 />
-
               </div>
 
               {/* CATEGORY AND PRICE */}
 
               <div className="za-add-two-columns">
 
-                <div className="za-add-field">
+                {/* CATEGORY */}
 
+                <div className="za-add-field">
                   <label htmlFor="za-add-category">
                     Category *
                   </label>
 
-                  <select
-                    id="za-add-category"
-                    required
-                    value={draft.category}
-                    disabled={saving}
-                    onChange={event =>
-                      update(
-                        'category',
-                        event.target.value
-                      )
-                    }
+                  <div
+                    style={{
+                      position: 'relative',
+                    }}
                   >
-                    <option value="">
-                      Select category
-                    </option>
+                    <select
+                      id="za-add-category"
+                      required
+                      value={draft.category}
+                      disabled={saving}
+                      style={{
+                        width: '100%',
+                        paddingRight: '36px',
+                      }}
+                      onChange={event => {
+                        const value =
+                          event.target.value
 
-                    {availableCategories.map(
-                      category => (
-                        <option
-                          key={category}
-                          value={category}
-                        >
-                          {category}
-                        </option>
-                      )
+                        if (
+                          value ===
+                          '__add_new_category__'
+                        ) {
+                          openNewCategory()
+                          return
+                        }
+
+                        update(
+                          'category',
+                          value,
+                        )
+
+                        setCategoryError('')
+                      }}
+                    >
+                      <option value="">
+                        {loadingCategories
+                          ? 'Loading categories...'
+                          : 'Select category'}
+                      </option>
+
+                      {availableCategories.map(
+                        category => (
+                          <option
+                            key={
+                              category.toLocaleLowerCase()
+                            }
+                            value={category}
+                          >
+                            {category}
+                          </option>
+                        ),
+                      )}
+
+                      <option
+                        value="__add_new_category__"
+                      >
+                        + Add New Category
+                      </option>
+                    </select>
+
+                    <ChevronDown
+                      size={16}
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: '12px',
+                        transform:
+                          'translateY(-50%)',
+                        pointerEvents: 'none',
+                        color: '#a32722',
+                      }}
+                    />
+                  </div>
+
+                  {categoryLoadError && (
+                    <p
+                      role="alert"
+                      style={{
+                        marginTop: '8px',
+                        color: '#a32722',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {categoryLoadError}
+                    </p>
+                  )}
+
+                  {!loadingCategories &&
+                    !categoryLoadError &&
+                    availableCategories.length ===
+                      0 && (
+                      <small
+                        style={{
+                          display: 'block',
+                          marginTop: '8px',
+                          color: '#8d776c',
+                        }}
+                      >
+                        No existing{' '}
+                        {getKindLabel(
+                          draft.kind,
+                        ).toLowerCase()}{' '}
+                        categories. Select
+                        + Add New Category.
+                      </small>
                     )}
-                  </select>
-
-                  <button
-                    type="button"
-                    className="za-add-category-button"
-                    disabled={saving}
-                    onClick={() =>
-                      setAddingCategory(
-                        previous => !previous
-                      )
-                    }
-                  >
-                    <Plus size={14} />
-                    Add Category
-                  </button>
-
                 </div>
 
-                <div className="za-add-field">
+                {/* PRICE */}
 
+                <div className="za-add-field">
                   <label htmlFor="za-add-price">
                     Price (LKR) *
                   </label>
@@ -989,50 +1257,182 @@ export default function AddProduct({
                     onChange={event =>
                       update(
                         'price',
-                        event.target.value
+                        event.target.value,
                       )
                     }
                   />
-
                 </div>
-
               </div>
 
               {/* ADD NEW CATEGORY */}
 
               {addingCategory && (
-                <div className="za-add-new-category">
-
-                  <input
-                    value={newCategory}
-                    disabled={saving}
-                    onChange={event =>
-                      setNewCategory(
-                        event.target.value
-                      )
-                    }
-                    placeholder="New category name"
-                    aria-label="New category name"
-                  />
-
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={() => {
-                      void addCategory()
+                <div
+                  className="za-add-new-category"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    gap: '10px',
+                    padding: '14px',
+                    marginBottom: '18px',
+                    border:
+                      '1px solid #ead4c9',
+                    borderRadius: '12px',
+                    background: '#fff9f5',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: '#a32722',
+                      fontSize: '13px',
+                      fontWeight: 700,
                     }}
                   >
-                    <Check size={16} />
-                    Add
-                  </button>
+                    <Plus size={16} />
 
+                    Add New{' '}
+                    {getKindLabel(
+                      draft.kind,
+                    )}{' '}
+                    Category
+                  </div>
+
+                  <input
+                    ref={categoryInputRef}
+                    type="text"
+                    maxLength={80}
+                    value={newCategory}
+                    disabled={saving}
+                    onChange={event => {
+                      setNewCategory(
+                        event.target.value,
+                      )
+
+                      setCategoryError('')
+                    }}
+                    onKeyDown={event => {
+                      if (
+                        event.key === 'Enter'
+                      ) {
+                        event.preventDefault()
+                        void addCategory()
+                      }
+
+                      if (
+                        event.key === 'Escape'
+                      ) {
+                        event.preventDefault()
+                        cancelNewCategory()
+                      }
+                    }}
+                    placeholder="Enter new category name"
+                    aria-label="New category name"
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+
+                  {categoryError && (
+                    <p
+                      role="alert"
+                      style={{
+                        margin: 0,
+                        color: '#a32722',
+                        fontSize: '12px',
+                      }}
+                    >
+                      {categoryError}
+                    </p>
+                  )}
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent:
+                        'flex-end',
+                      gap: '8px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={
+                        cancelNewCategory
+                      }
+                      style={{
+                        padding:
+                          '9px 13px',
+                        border:
+                          '1px solid #e4cfc4',
+                        borderRadius: '8px',
+                        background:
+                          '#ffffff',
+                        color: '#573b31',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={
+                        saving ||
+                        !newCategory.trim()
+                      }
+                      onClick={() => {
+                        void addCategory()
+                      }}
+                      style={{
+                        display:
+                          'inline-flex',
+                        alignItems:
+                          'center',
+                        gap: '6px',
+                        padding:
+                          '9px 13px',
+                        border: 'none',
+                        borderRadius: '8px',
+                        background:
+                          '#a32722',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        opacity:
+                          !newCategory.trim()
+                            ? 0.6
+                            : 1,
+                      }}
+                    >
+                      <Check size={15} />
+                      Use Category
+                    </button>
+                  </div>
+
+                  <small
+                    style={{
+                      color: '#907a70',
+                      fontSize: '11px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    This category will become
+                    available in Add Product
+                    and Edit Product after
+                    the product is
+                    successfully saved.
+                  </small>
                 </div>
               )}
 
               {/* DESCRIPTION */}
 
               <div className="za-add-field">
-
                 <label htmlFor="za-add-description">
                   Description
                 </label>
@@ -1042,22 +1442,22 @@ export default function AddProduct({
                   rows={4}
                   maxLength={500}
                   placeholder="Write a short description..."
-                  value={draft.description}
+                  value={
+                    draft.description
+                  }
                   disabled={saving}
                   onChange={event =>
                     update(
                       'description',
-                      event.target.value
+                      event.target.value,
                     )
                   }
                 />
-
               </div>
 
               {/* INGREDIENTS */}
 
               <div className="za-add-field">
-
                 <label htmlFor="za-add-ingredients">
                   Ingredients
                 </label>
@@ -1065,17 +1465,24 @@ export default function AddProduct({
                 <textarea
                   id="za-add-ingredients"
                   rows={3}
-                  placeholder="e.g. Rice, chicken, spices..."
-                  value={draft.ingredients}
+                  placeholder={
+                    draft.kind === 'drink'
+                      ? 'e.g. Milk, coffee, ice...'
+                      : draft.kind === 'snacks'
+                        ? 'e.g. Potato, pastry, spices...'
+                        : 'e.g. Rice, chicken, spices...'
+                  }
+                  value={
+                    draft.ingredients
+                  }
                   disabled={saving}
                   onChange={event =>
                     update(
                       'ingredients',
-                      event.target.value
+                      event.target.value,
                     )
                   }
                 />
-
               </div>
 
               {/* SERVING AND DIETARY */}
@@ -1083,42 +1490,51 @@ export default function AddProduct({
               <div className="za-add-two-columns">
 
                 <div className="za-add-field">
-
                   <label htmlFor="za-add-serving">
                     Serving Size
                   </label>
 
                   <input
                     id="za-add-serving"
-                    placeholder="e.g. 1 portion / 350 ml"
-                    value={draft.servingSize}
+                    placeholder={
+                      draft.kind === 'drink'
+                        ? 'e.g. 350 ml'
+                        : draft.kind === 'snacks'
+                          ? 'e.g. 2 pieces'
+                          : 'e.g. 1 portion'
+                    }
+                    value={
+                      draft.servingSize
+                    }
                     disabled={saving}
                     onChange={event =>
                       update(
                         'servingSize',
-                        event.target.value
+                        event.target.value,
                       )
                     }
                   />
-
                 </div>
 
-                {draft.kind === 'food' ? (
-
+                {isFoodOrSnacks(
+                  draft.kind,
+                ) ? (
                   <div className="za-add-field">
-
                     <label htmlFor="za-add-dietary">
                       Dietary Type
                     </label>
 
                     <select
                       id="za-add-dietary"
-                      value={draft.dietaryType}
+                      value={
+                        draft.dietaryType
+                      }
                       disabled={saving}
                       onChange={event =>
                         update(
                           'dietaryType',
-                          event.target.value as DietaryType
+                          event.target
+                            .value as DietaryType,
                         )
                       }
                     >
@@ -1130,25 +1546,24 @@ export default function AddProduct({
                         Non-Vegetarian
                       </option>
                     </select>
-
                   </div>
-
                 ) : (
-
                   <div className="za-add-field">
-
                     <label htmlFor="za-add-dairy">
                       Dairy Type
                     </label>
 
                     <select
                       id="za-add-dairy"
-                      value={draft.dairyType}
+                      value={
+                        draft.dairyType
+                      }
                       disabled={saving}
                       onChange={event =>
                         update(
                           'dairyType',
-                          event.target.value as DairyType
+                          event.target
+                            .value as DairyType,
                         )
                       }
                     >
@@ -1164,29 +1579,31 @@ export default function AddProduct({
                         Dairy Free
                       </option>
                     </select>
-
                   </div>
                 )}
-
               </div>
 
               {/* SPICE LEVEL */}
 
-              {draft.kind === 'food' && (
+              {isFoodOrSnacks(
+                draft.kind,
+              ) && (
                 <div className="za-add-field">
-
                   <label htmlFor="za-add-spice">
                     Spice Level
                   </label>
 
                   <select
                     id="za-add-spice"
-                    value={draft.spiceLevel}
+                    value={
+                      draft.spiceLevel
+                    }
                     disabled={saving}
                     onChange={event =>
                       update(
                         'spiceLevel',
-                        event.target.value as SpiceLevel
+                        event.target
+                          .value as SpiceLevel,
                       )
                     }
                   >
@@ -1206,7 +1623,6 @@ export default function AddProduct({
                       Hot
                     </option>
                   </select>
-
                 </div>
               )}
 
@@ -1215,9 +1631,7 @@ export default function AddProduct({
             {/* PRODUCT VISIBILITY */}
 
             <section className="za-add-card">
-
               <div className="za-add-card-heading">
-
                 <Check size={22} />
 
                 <div>
@@ -1230,24 +1644,35 @@ export default function AddProduct({
                     should appear.
                   </p>
                 </div>
-
               </div>
 
               <Toggle
                 label="Available"
                 description="Show this product on the customer menu."
-                checked={draft.available}
+                checked={
+                  draft.available
+                }
+                disabled={saving}
                 onChange={value =>
-                  update('available', value)
+                  update(
+                    'available',
+                    value,
+                  )
                 }
               />
 
               <Toggle
                 label="Featured Product"
                 description="Highlight this item on your menu."
-                checked={draft.featured}
+                checked={
+                  draft.featured
+                }
+                disabled={saving}
                 onChange={value =>
-                  update('featured', value)
+                  update(
+                    'featured',
+                    value,
+                  )
                 }
               />
 
@@ -1255,11 +1680,14 @@ export default function AddProduct({
                 label="New Arrival"
                 description="Mark this product as new."
                 checked={draft.isNew}
+                disabled={saving}
                 onChange={value =>
-                  update('isNew', value)
+                  update(
+                    'isNew',
+                    value,
+                  )
                 }
               />
-
             </section>
 
           </div>
@@ -1271,9 +1699,7 @@ export default function AddProduct({
             {/* IMAGE UPLOAD */}
 
             <section className="za-add-card">
-
               <div className="za-add-card-heading">
-
                 <ImagePlus size={22} />
 
                 <div>
@@ -1286,7 +1712,6 @@ export default function AddProduct({
                     your menu item.
                   </p>
                 </div>
-
               </div>
 
               <input
@@ -1295,7 +1720,9 @@ export default function AddProduct({
                 accept="image/png,image/jpeg,image/webp"
                 hidden
                 disabled={saving}
-                onChange={handleImage}
+                onChange={
+                  handleImage
+                }
               />
 
               <button
@@ -1306,18 +1733,16 @@ export default function AddProduct({
                   fileInputRef.current?.click()
                 }
               >
-
                 {previewUrl ? (
-
                   <img
                     src={previewUrl}
                     alt="Selected product"
                   />
-
                 ) : (
-
                   <>
-                    <UploadCloud size={35} />
+                    <UploadCloud
+                      size={35}
+                    />
 
                     <strong>
                       Click to Upload Image
@@ -1328,7 +1753,6 @@ export default function AddProduct({
                     </small>
                   </>
                 )}
-
               </button>
 
               {previewUrl && (
@@ -1344,15 +1768,12 @@ export default function AddProduct({
                   Remove Image
                 </button>
               )}
-
             </section>
 
             {/* LIVE PREVIEW */}
 
             <section className="za-add-card">
-
               <div className="za-add-card-heading">
-
                 <Eye size={22} />
 
                 <div>
@@ -1365,15 +1786,12 @@ export default function AddProduct({
                     product will look.
                   </p>
                 </div>
-
               </div>
 
               <div className="za-add-preview">
 
                 <div className="za-add-preview-image">
-
                   {previewUrl ? (
-
                     <img
                       src={previewUrl}
                       alt={
@@ -1381,20 +1799,19 @@ export default function AddProduct({
                         'Product preview'
                       }
                     />
-
                   ) : (
-
-                    <UtensilsCrossed size={46} />
-
+                    <UtensilsCrossed
+                      size={46}
+                    />
                   )}
-
                 </div>
 
                 <div className="za-add-preview-info">
-
                   <span>
                     {draft.category ||
-                      'Category'}
+                      getKindLabel(
+                        draft.kind,
+                      )}
                   </span>
 
                   <h3>
@@ -1408,18 +1825,20 @@ export default function AddProduct({
                   </p>
 
                   <strong>
-                    {draft.price.trim() !== '' &&
+                    {draft.price.trim() !==
+                      '' &&
                     Number.isFinite(
-                      Number(draft.price)
+                      Number(
+                        draft.price,
+                      ),
                     )
                       ? `LKR ${Number(
-                          draft.price
+                          draft.price,
                         ).toLocaleString(
-                          'en-LK'
+                          'en-LK',
                         )}`
                       : 'LKR 0'}
                   </strong>
-
                 </div>
 
                 <div className="za-add-preview-badges">
@@ -1443,13 +1862,10 @@ export default function AddProduct({
                   )}
 
                 </div>
-
               </div>
-
             </section>
 
           </div>
-
         </div>
 
         {/* ERROR MESSAGE */}
@@ -1466,7 +1882,6 @@ export default function AddProduct({
         {/* SAVE / CANCEL */}
 
         <div className="za-add-actions">
-
           <button
             type="button"
             className="za-add-cancel"
@@ -1489,11 +1904,9 @@ export default function AddProduct({
               ? 'Saving Product...'
               : 'Save Product'}
           </button>
-
         </div>
 
       </form>
-
     </div>
   )
 }

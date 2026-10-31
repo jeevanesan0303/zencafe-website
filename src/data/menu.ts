@@ -2,11 +2,30 @@
 /* ==========================================
    ZEN CAFÉ — MENU DATA & TYPES
    File: src/data/menu.ts
+
+   Product types:
+   - Food
+   - Drink
+   - Snacks
+
+   Snacks are displayed in Zen Kitchen.
+
+   Existing products and gallery data
+   are preserved.
 ========================================== */
 
-export type MenuKind = 'drink' | 'food'
+/* ==========================================
+   PRODUCT TYPES
+========================================== */
 
-export type DietaryType = 'veg' | 'non-veg'
+export type MenuKind =
+  | 'drink'
+  | 'food'
+  | 'snacks'
+
+export type DietaryType =
+  | 'veg'
+  | 'non-veg'
 
 export type DairyType =
   | 'milk'
@@ -19,8 +38,14 @@ export type SpiceLevel =
   | 'medium'
   | 'hot'
 
+/* ==========================================
+   MENU PRODUCT DATA MODEL
+========================================== */
+
 export type MenuItem = {
   id: string
+
+  // Product type
   kind: MenuKind
 
   // Basic product information
@@ -44,7 +69,7 @@ export type MenuItem = {
   isNew?: boolean
   spiceLevel?: SpiceLevel
 
-  // Food-specific information
+  // Food and Snacks information
   dietaryType?: DietaryType
 
   // Drink-specific information
@@ -52,8 +77,91 @@ export type MenuItem = {
 }
 
 /* ==========================================
+   PRODUCT TYPE CONFIGURATION
+
+   Central configuration for the admin
+   dashboard and customer website.
+========================================== */
+
+export const MENU_KINDS: MenuKind[] = [
+  'food',
+  'drink',
+  'snacks',
+]
+
+export const MENU_KIND_LABELS: Record<
+  MenuKind,
+  string
+> = {
+  food: 'Food',
+  drink: 'Drink',
+  snacks: 'Snacks',
+}
+
+/* ==========================================
+   ZEN KITCHEN PRODUCT TYPES
+
+   Both Food and Snacks belong to
+   the Zen Kitchen customer page.
+========================================== */
+
+export const ZEN_KITCHEN_KINDS: MenuKind[] = [
+  'food',
+  'snacks',
+]
+
+/* ==========================================
+   PRODUCT TYPE HELPERS
+========================================== */
+
+/**
+ * Check whether a value is a valid
+ * Zen Café product type.
+ */
+export function isMenuKind(
+  value: unknown
+): value is MenuKind {
+  return (
+    value === 'food' ||
+    value === 'drink' ||
+    value === 'snacks'
+  )
+}
+
+/**
+ * Check whether a product belongs
+ * to Zen Kitchen.
+ *
+ * Food and Snacks are displayed
+ * in Zen Kitchen.
+ */
+export function isZenKitchenKind(
+  kind: MenuKind
+): boolean {
+  return (
+    kind === 'food' ||
+    kind === 'snacks'
+  )
+}
+
+/**
+ * Get the display label for a
+ * product type.
+ */
+export function getMenuKindLabel(
+  kind: MenuKind
+): string {
+  return MENU_KIND_LABELS[kind]
+}
+
+/* ==========================================
    DEFAULT MENU PRODUCTS
-   Existing products are preserved.
+
+   All existing products are preserved.
+
+   Snacks can be created through the
+   admin dashboard after the API and
+   database support the new type.
 ========================================== */
 
 export const DEFAULT_MENU_ITEMS: MenuItem[] = [
@@ -251,6 +359,9 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
 
 /* ==========================================
    EXISTING DRINK MENU EXPORT
+
+   Preserved for components that use
+   MENU_ITEMS for the drink menu.
 ========================================== */
 
 export const MENU_ITEMS: MenuItem[] =
@@ -259,7 +370,29 @@ export const MENU_ITEMS: MenuItem[] =
   )
 
 /* ==========================================
+   ZEN KITCHEN MENU EXPORTS
+
+   These exports can be used by the
+   Zen Kitchen page.
+
+   The live website should still use
+   the database-backed menu store.
+========================================== */
+
+export const ZEN_KITCHEN_MENU_ITEMS: MenuItem[] =
+  DEFAULT_MENU_ITEMS.filter(
+    item => isZenKitchenKind(item.kind)
+  )
+
+export const DEFAULT_SNACK_ITEMS: MenuItem[] =
+  DEFAULT_MENU_ITEMS.filter(
+    item => item.kind === 'snacks'
+  )
+
+/* ==========================================
    EXISTING GALLERY DATA
+
+   Preserved without changes.
 ========================================== */
 
 export const GALLERY_SEED = [
