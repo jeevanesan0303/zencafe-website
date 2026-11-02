@@ -235,7 +235,7 @@ export default function App() {
               </div>
 
               <p className="section-copy">
-                Menu, room, booking and gallery — at a glance.
+                
               </p>
             </div>
 
