@@ -98,7 +98,7 @@ const navLinks = [
     icon: UtensilsCrossed,
   },
   {
-    label: 'Private Room',
+    label: 'Party Room',
     href: '/#room-booking',
     icon: DoorOpen,
   },

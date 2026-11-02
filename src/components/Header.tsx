@@ -18,7 +18,7 @@ import PromotionalBanner from './PromotionalBanner'
 const links = [
   ['Home', 'home'],
   ['Our Menu', 'menu'],
-  ['Private Room', 'room-booking'],
+  ['Party Room', 'room-booking'],
   ['Gallery', 'gallery'],
   ['Contact', 'contact'],
 ] as const
@@ -28,7 +28,7 @@ const links = [
 const mobileLinks = [
   { label: 'Home', id: 'home', icon: Home },
   { label: 'Our Menu', id: 'menu', icon: UtensilsCrossed },
-  { label: 'Private Room', id: 'room-booking', icon: DoorOpen },
+  { label: 'Party Room', id: 'room-booking', icon: DoorOpen },
   { label: 'Gallery', id: 'gallery', icon: Images },
   { label: 'Contact', id: 'contact', icon: MapPin },
   { label: 'Games', href: '/games.html', icon: Gamepad2 },
@@ -98,7 +98,7 @@ export default function Header() {
           <img src="/assets/zen-logo.png" alt="Zen Café" className="h-12 w-12 rounded-full object-contain sm:h-14 sm:w-14"/>
           <span className="leading-none">
             <b className="zen-navbar-brand-japan block text-[21px] sm:text-[24px]">ZEN CAFE</b>
-            <small className="mt-1 hidden text-[7px] font-semibold uppercase tracking-[.16em] text-[#76665c] sm:block">Jaffna · Café · Private Room</small>
+            <small className="mt-1 hidden text-[7px] font-semibold uppercase tracking-[.16em] text-[#76665c] sm:block">Jaffna · Café · Party Room</small>
           </span>
         </button>
 

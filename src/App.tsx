@@ -44,7 +44,7 @@ const overviewCards: OverviewCard[] = [
     icon: UtensilsCrossed,
   },
   {
-    title: 'Private room',
+    title: 'Party room',
     meta: '10–15 guests · max 3h',
     icon: Users,
   },
@@ -314,7 +314,7 @@ export default function App() {
 
             <div
               className="room-essentials-v121 mb-8 overflow-hidden rounded-2xl border border-[#e3c6b2] bg-[#f7e4d5] shadow-[0_12px_35px_rgba(73,39,25,0.05)]"
-              aria-label="Private room essentials"
+              aria-label="Party room essentials"
             >
               <div className="room-essential-v121">
                 <Users size={21} strokeWidth={1.6} />

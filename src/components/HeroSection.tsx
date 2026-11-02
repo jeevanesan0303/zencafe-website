@@ -206,7 +206,7 @@ export default function HeroSection(){
     {/* Hero copy intentionally never changes when the hidden panda sequence plays. */}
     <div className="video-hero-content">
       <div className="video-hero-copy-block">
-        <div className="video-hero-brand"><img src="/assets/zen-logo.png" alt="Zen Café logo"/><div><b>ZEN CAFÉ · JAFFNA</b><span>Café · private room</span></div></div>
+        <div className="video-hero-brand"><img src="/assets/zen-logo.png" alt="Zen Café logo"/><div><b>ZEN CAFÉ · JAFFNA</b><span>Café · Party room</span></div></div>
         <p className="video-hero-kicker">A quiet surprise.</p>
         <div className="hero-meet-video-shell" role="img" aria-label="Meet Zen tiger pull introduction">
           <video
@@ -229,7 +229,7 @@ export default function HeroSection(){
         <p className="video-hero-description">Calm food, cozy space, premium Zen moments.</p>
       </div>
       <div className="video-hero-actions">
-        <button onClick={()=>go('room-booking')} className="hero-primary-btn"><DoorOpen size={16}/> Book private room</button>
+        <button onClick={()=>go('room-booking')} className="hero-primary-btn"><DoorOpen size={16}/> Book party room</button>
         <button onClick={()=>go('menu')} className="hero-secondary-btn">Explore menu <ArrowRight size={17}/></button>
         <a href="/zen-kitchen.html" className="hero-kitchen-btn"><ChefHat size={16}/> Zen Kitchen <ArrowRight size={16}/></a>
       </div>

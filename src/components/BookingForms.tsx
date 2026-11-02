@@ -666,7 +666,7 @@ export function RoomBooking({
       form.guests > 15
     ) {
       nextErrors.guests =
-        'The private room accommodates 1–15 guests.'
+        'The party room accommodates 1–15 guests.'
     }
 
     setErrors(nextErrors)
