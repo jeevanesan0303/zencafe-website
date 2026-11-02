@@ -1561,11 +1561,8 @@ export default function KitchenPage() {
               <div className="zen-kitchen-snacks-count">
                 <Utensils size={15} />
 
-                {snackItems.length}{' '}
-                Snack
-                {snackItems.length === 1
-                  ? ''
-                  : 's'}
+                
+                
               </div>
 
             </div>
