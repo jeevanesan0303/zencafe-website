@@ -1553,13 +1553,13 @@ export default function KitchenPage() {
 
                 <p className="section-copy mt-5">
                   Discover freshly prepared
-                  snacks, savoury favourites
+                  Food, savoury favourites
                   and delicious little treats.
                 </p>
               </div>
 
               <div className="zen-kitchen-snacks-count">
-                <Utensils size={15} />
+               
 
                 
                 
