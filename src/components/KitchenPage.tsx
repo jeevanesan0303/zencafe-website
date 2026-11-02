@@ -1570,39 +1570,7 @@ export default function KitchenPage() {
 
             </div>
 
-            {/* SNACKS CATEGORIES */}
-
-            {snackCategories.length ===
-            0 ? (
-              <div className="panel grid min-h-[260px] place-items-center p-8 text-center">
-                <div>
-                  <Utensils
-                    className="mx-auto text-[#a32722]"
-                    size={34}
-                  />
-
-                  <h3 className="mt-4 font-serif text-[32px]">
-                    Snacks coming soon.
-                  </h3>
-
-                  <p className="mt-2 text-[12px] text-[#74645b]">
-                    Fresh bites will
-                    appear here when
-                    available Snacks
-                    products are added.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <KitchenCategoryList
-                groups={
-                  snackCategories
-                }
-                prefix="snacks"
-              />
-            )}
-
-          </div>
+           </div>
         </section>
 
       </main>

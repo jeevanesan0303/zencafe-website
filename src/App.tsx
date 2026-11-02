@@ -321,7 +321,7 @@ export default function App() {
 
                 <span>
                   <small>Room capacity</small>
-                  <b>10–15 guests</b>
+                  <b>01–15 guests</b>
                 </span>
               </div>
 
