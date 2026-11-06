@@ -208,24 +208,39 @@ export default function HeroSection(){
       <div className="video-hero-copy-block">
         <div className="video-hero-brand"><img src="/assets/zen-logo.png" alt="Zen Café logo"/><div><b>ZEN CAFÉ · JAFFNA</b><span>Café · Party room</span></div></div>
         <p className="video-hero-kicker">A quiet surprise.</p>
-        <div className="hero-meet-video-shell" role="img" aria-label="Meet Zen tiger pull introduction">
-          <video
-            className="hero-meet-video hero-meet-video--tiger"
-            poster="/assets/hero-meet-zen-tiger-pull-poster.png"
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="auto"
-            controls={false}
-            disablePictureInPicture
-            aria-hidden="true"
-            tabIndex={-1}
-          >
-            <source src="/assets/hero-meet-zen-tiger-pull.webm" type="video/webm" />
-            <source src="/assets/hero-meet-zen-tiger-pull.mp4" type="video/mp4" />
-          </video>
-        </div>
+        
+<div
+  className="hero-meet-video-shell"
+  role="img"
+  aria-label="Meet Zen tiger pull introduction"
+>
+  <video
+    className="hero-meet-video hero-meet-video--tiger"
+    poster="/assets/hero-meet-zen-tiger-pull-poster.png"
+    autoPlay
+    loop
+    muted
+    playsInline
+    preload="metadata"
+    controls={false}
+    disablePictureInPicture
+    aria-hidden="true"
+    tabIndex={-1}
+  >
+    {/* iPhone / Safari: HEVC with transparency */}
+    <source
+      src="/assets/hero-meet-zen-tiger-ios.mov"
+      type='video/quicktime; codecs="hvc1"'
+    />
+
+    {/* Android / Chrome: transparent WebM */}
+    <source
+      src="/assets/hero-meet-zen-tiger-pull.webm"
+      type="video/webm"
+    />
+  </video>
+</div>
+
         <p className="video-hero-description">Calm food, cozy space, premium Zen moments.</p>
       </div>
       <div className="video-hero-actions">
