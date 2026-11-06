@@ -222,7 +222,7 @@ export default function HeroSection(){
             aria-hidden="true"
             tabIndex={-1}
           >
-            <source src="/assets/hero-meet-zen-tiger-pull.mp4" type="video/mp4" />
+            <source src="/assets/hero-meet-zen-tiger-pull-1.mp4" type="video/mp4" />
             <source src="/assets/hero-meet-zen-tiger-pull.mp4" type="video/mp4" />
           </video>
         </div>
